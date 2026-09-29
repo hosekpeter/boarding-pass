@@ -254,6 +254,21 @@ combinations, persistence, concurrent writes and schema initialization, upload
 limits, overload, and upstream failures. CI runs the same checks with Poppler
 installed and a PostgreSQL service container.
 
+## Benchmarks
+
+`make bench` measures BCBP parsing and PDF-to-BCBP processing without race or
+coverage instrumentation. It requires Go and Poppler, but no database or airport
+API. To compare against the separate Python implementation:
+
+```bash
+make bench-compare PYTHON=../boarding-pass-python/.venv/bin/python
+```
+
+See [benchmark instructions and methodology](benchmarks/README.md) and the
+[recorded measurements](benchmarks/results.json). Both implementations use the
+same verified inputs. The PDF result compares different decoder libraries, so
+it should not be interpreted as a general language-speed comparison.
+
 ## Design choices
 
 The application uses `net/http` for routing and a shared `pgx/v5/pgxpool`
