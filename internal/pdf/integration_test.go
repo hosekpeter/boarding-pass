@@ -13,6 +13,9 @@ import (
 	"boarding-pass/internal/testutil"
 )
 
+// Race detection and coverage make decoding slower on shared CI runners.
+const pdfTestTimeout = time.Minute
+
 func TestRealPDFExtraction(t *testing.T) {
 	extractor, err := New()
 	if err != nil {
@@ -40,7 +43,7 @@ func TestRealPDFExtraction(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
 			defer cancel()
 			result, err := extractor.Extract(ctx, tc.data)
 			if !errors.Is(err, tc.want) {
@@ -75,7 +78,7 @@ func TestBarcodeOrientationsOnSamePage(t *testing.T) {
 					{Payload: payload, Transform: "1 0 0 1 30 30"},
 					{Payload: second, Transform: transform},
 				})
-				ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+				ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
 				defer cancel()
 				result, err := extractor.Extract(ctx, data)
 				if duplicate {
