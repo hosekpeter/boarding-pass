@@ -1,0 +1,275 @@
+openapi: 3.0.3
+info:
+  title: Boarding Pass API
+  version: 1.0.0
+  description: Parse a PDF417 boarding pass from PDF and retain successfully parsed results.
+servers:
+  - url: http://localhost:8080
+paths:
+  /boarding-pass/parse-from-file:
+    post:
+      operationId: parseBoardingPass
+      summary: Decode and save one boarding pass
+      description: >-
+        Accepts a PDF of up to 10 pages. The complete multipart request must fit
+        within 10 MiB. Repeated identical barcodes are accepted; distinct barcodes
+        in the same document are rejected. Each successful call creates a new
+        history entry, including repeated uploads. Processing has a 30-second
+        context deadline. Airport lookup failures do not save partial records.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+            encoding:
+              file:
+                contentType: application/pdf
+      responses:
+        '200':
+          description: Decoded and committed to history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParsedPass'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '408':
+          $ref: '#/components/responses/Error'
+        '413':
+          description: Multipart request exceeds 10 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: Expected multipart/form-data containing a PDF
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: Invalid PDF, too many pages, missing or ambiguous PDF417 barcode, or invalid BCBP
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          $ref: '#/components/responses/Error'
+        '502':
+          description: Airport information is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: Both processing slots are busy; retry after one second
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                example: 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '504':
+          $ref: '#/components/responses/Error'
+  /boarding-passes:
+    get:
+      operationId: listBoardingPasses
+      summary: List previously parsed boarding passes, newest first
+      description: >-
+        Filters are combined with AND. Total counts all matching records before
+        pagination. Equal timestamps are ordered by insertion sequence, newest first.
+        Unknown or repeated query parameters, invalid UTF-8, and NUL characters are rejected.
+      parameters:
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - in: query
+          name: offset
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 2147483647
+            default: 0
+        - in: query
+          name: passenger_name
+          description: Case-insensitive literal substring of the passenger name
+          schema:
+            type: string
+            maxLength: 100
+        - in: query
+          name: airline_code
+          description: Exact, case-sensitive match on any flight leg; empty means no filter
+          schema:
+            type: string
+            maxLength: 3
+      responses:
+        '200':
+          description: Matching records
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, total, limit, offset]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/ParsedPass'
+                        - type: object
+                          required: [id, parsed_at]
+                          properties:
+                            id:
+                              type: string
+                              format: uuid
+                            parsed_at:
+                              type: string
+                              format: date-time
+                  total:
+                    type: integer
+                    minimum: 0
+                  limit:
+                    type: integer
+                  offset:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/Error'
+        '504':
+          $ref: '#/components/responses/Error'
+  /healthz:
+    get:
+      operationId: health
+      summary: Process liveness (does not check external services)
+      responses:
+        '200':
+          description: Server is running
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+  /openapi.yaml:
+    get:
+      operationId: openAPI
+      summary: Download this OpenAPI specification
+      responses:
+        '200':
+          description: OpenAPI YAML
+          content:
+            application/yaml:
+              schema:
+                type: string
+components:
+  responses:
+    BadRequest:
+      description: Invalid input
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Error:
+      description: Request failed; inspect the stable error code
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              example: barcode_not_found
+            message:
+              type: string
+              example: No readable PDF417 barcode found
+    ParsedPass:
+      type: object
+      required: [decoded_bcbp]
+      properties:
+        decoded_bcbp:
+          type: object
+          required: [passenger_name, legs]
+          properties:
+            passenger_name:
+              type: string
+              example: CYPRIAN/MICHAL
+            legs:
+              type: array
+              minItems: 1
+              maxItems: 4
+              items:
+                $ref: '#/components/schemas/Leg'
+    Leg:
+      type: object
+      required: [booking_reference, airline_code, flight_number, julian_date, cabin_class, seat, passenger_status, origin, destination]
+      properties:
+        booking_reference:
+          type: string
+          example: ZKN85B
+        airline_code:
+          type: string
+          example: FR
+        flight_number:
+          type: string
+          example: '7774'
+        julian_date:
+          type: integer
+          minimum: 1
+          maximum: 366
+          description: Day of year; BCBP mandatory fields do not carry the flight year
+          example: 105
+        cabin_class:
+          type: string
+          enum: [first, business, premium_economy, economy, unknown]
+        seat:
+          type: string
+          example: 29C
+        passenger_status:
+          type: string
+          example: '1'
+        origin:
+          $ref: '#/components/schemas/Airport'
+        destination:
+          $ref: '#/components/schemas/Airport'
+    Airport:
+      type: object
+      required: [code, airport_name, city_name, country]
+      properties:
+        code:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          example: PRG
+        airport_name:
+          type: string
+          example: Václav Havel Airport Prague
+        city_name:
+          type: string
+          example: Prague
+        country:
+          type: string
+          example: Czechia
