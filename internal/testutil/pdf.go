@@ -10,6 +10,7 @@ import (
 
 	"github.com/boombuler/barcode"
 	"github.com/boombuler/barcode/pdf417"
+	"github.com/stretchr/testify/require"
 )
 
 // PDFBarcode positions a vector barcode using a PDF transformation matrix.
@@ -84,6 +85,6 @@ func testBarcode(t testing.TB, payload string) barcode.Barcode {
 			return matrix
 		}
 	}
-	t.Fatal("could not generate a PDF417 fixture with consistent row indicators")
+	require.FailNow(t, "could not generate a PDF417 fixture with consistent row indicators")
 	return nil
 }

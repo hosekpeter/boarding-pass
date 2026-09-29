@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Payload decoded from the assignment's PDF. Keep its fixed-width spaces.
@@ -11,17 +14,12 @@ const sample = "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 149>518
 
 func TestParseSample(t *testing.T) {
 	pass, err := Parse(sample)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pass.PassengerName != "CYPRIAN/MICHAL" || len(pass.Legs) != 1 {
-		t.Fatalf("unexpected pass: %+v", pass)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, "CYPRIAN/MICHAL", pass.PassengerName)
+	require.Len(t, pass.Legs, 1)
 	want := Leg{BookingReference: "ZKN85B", AirlineCode: "FR", FlightNumber: "7774", JulianDate: 105,
 		CabinClass: "economy", Seat: "29C", PassengerStatus: "1", Origin: Airport{Code: "KSC"}, Destination: Airport{Code: "PRG"}}
-	if pass.Legs[0] != want {
-		t.Fatalf("got %+v, want %+v", pass.Legs[0], want)
-	}
+	assert.Equal(t, want, pass.Legs[0])
 }
 
 func TestParseMultipleLegsAndSecurity(t *testing.T) {
@@ -30,12 +28,12 @@ func TestParseMultipleLegsAndSecurity(t *testing.T) {
 	first := sample[23:58] + "06" + "M2ABC "
 	second := fmt.Sprintf("%-7s%s%s%-3s%-5s%s%s%s%-5s%s%s", "NEXT12", "PRG", "LHR", "BA", "0012A", "366", "C", "001A", "00002", "1", "00")
 	pass, err := Parse("M2" + sample[2:23] + first + second + "^103SIG")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pass.Legs) != 2 || pass.Legs[1].FlightNumber != "12A" || pass.Legs[1].Seat != "1A" || pass.Legs[1].CabinClass != "business" || pass.Legs[1].JulianDate != 366 {
-		t.Fatalf("unexpected itinerary: %+v", pass)
-	}
+	require.NoError(t, err)
+	require.Len(t, pass.Legs, 2)
+	assert.Equal(t, "12A", pass.Legs[1].FlightNumber)
+	assert.Equal(t, "1A", pass.Legs[1].Seat)
+	assert.Equal(t, "business", pass.Legs[1].CabinClass)
+	assert.Equal(t, 366, pass.Legs[1].JulianDate)
 }
 
 func TestParseInvalid(t *testing.T) {
@@ -50,30 +48,26 @@ func TestParseInvalid(t *testing.T) {
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Parse(value); err == nil {
-				t.Fatal("expected error")
-			}
+			_, err := Parse(value)
+			assert.Error(t, err)
 		})
 	}
 }
 
 func TestAllTruncations(t *testing.T) {
 	for n := 0; n < len(sample); n++ {
-		if _, err := Parse(sample[:n]); err == nil {
-			t.Fatalf("accepted truncation at %d", n)
-		}
+		_, err := Parse(sample[:n])
+		assert.Error(t, err, "accepted truncation at %d", n)
 	}
 }
 
 func TestUnknownCabinAndUnassignedSeat(t *testing.T) {
 	payload := sample[:47] + "Z    " + sample[52:]
 	pass, err := Parse(payload)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if pass.Legs[0].CabinClass != "unknown" || pass.Legs[0].Seat != "" {
-		t.Fatalf("unexpected leg: %+v", pass.Legs[0])
-	}
+	require.NoError(t, err)
+	require.Len(t, pass.Legs, 1)
+	assert.Equal(t, "unknown", pass.Legs[0].CabinClass)
+	assert.Empty(t, pass.Legs[0].Seat)
 }
 
 func FuzzParse(f *testing.F) {
@@ -82,8 +76,10 @@ func FuzzParse(f *testing.F) {
 	f.Add("M1" + strings.Repeat(" ", 58))
 	f.Fuzz(func(t *testing.T, payload string) {
 		pass, err := Parse(payload)
-		if err == nil && (len(pass.Legs) < 1 || len(pass.Legs) > 4 || pass.PassengerName == "") {
-			t.Fatalf("invalid successful parse: %+v", pass)
+		if err == nil {
+			assert.GreaterOrEqual(t, len(pass.Legs), 1)
+			assert.LessOrEqual(t, len(pass.Legs), 4)
+			assert.NotEmpty(t, pass.PassengerName)
 		}
 	})
 }
@@ -99,8 +95,10 @@ func TestJulianDateFormatAndBounds(t *testing.T) {
 	} {
 		t.Run(tc.value, func(t *testing.T) {
 			_, err := Parse(sample[:44] + tc.value + sample[47:])
-			if (err == nil) != tc.valid {
-				t.Fatalf("date %q: %v", tc.value, err)
+			if tc.valid {
+				assert.NoError(t, err)
+			} else {
+				assert.Error(t, err)
 			}
 		})
 	}

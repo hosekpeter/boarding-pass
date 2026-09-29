@@ -13,6 +13,9 @@ import (
 	"boarding-pass/internal/config"
 	"boarding-pass/internal/dependencies"
 	"boarding-pass/internal/store"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeScope struct{}
@@ -26,23 +29,17 @@ func (fakeScope) Close() error                 { return nil }
 
 func TestStartReportsBindFailure(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer listener.Close()
 	server := New(fakeScope{}, config.Config{HTTPAddr: listener.Addr().String()})
-	if err := server.Start(t.Context()); err == nil {
-		t.Fatal("expected an error for an occupied port")
-	}
+	assert.Error(t, server.Start(t.Context()), "expected an error for an occupied port")
 }
 
 func TestStartWithCanceledContextDoesNotBind(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	server := New(fakeScope{}, config.Config{HTTPAddr: "invalid address"})
-	if err := server.Start(ctx); err != nil {
-		t.Fatalf("canceled startup tried to bind: %v", err)
-	}
+	assert.NoError(t, server.Start(ctx), "canceled startup tried to bind")
 }
 
 func TestShutdownWaitsForActiveRequest(t *testing.T) {
@@ -71,9 +68,9 @@ func TestShutdownWaitsForActiveRequest(t *testing.T) {
 	select {
 	case addr = <-address:
 	case err := <-done:
-		t.Fatalf("server stopped during startup: %v", err)
+		require.FailNow(t, "server stopped during startup", "error: %v", err)
 	case <-time.After(3 * time.Second):
-		t.Fatal("server did not start")
+		require.FailNow(t, "server did not start")
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
 	defer client.CloseIdleConnections()
@@ -89,29 +86,25 @@ func TestShutdownWaitsForActiveRequest(t *testing.T) {
 	select {
 	case <-entered:
 	case <-time.After(3 * time.Second):
-		t.Fatal("request did not reach the server")
+		require.FailNow(t, "request did not reach the server")
 	}
 	cancel()
 	select {
 	case <-shutdown:
 	case <-time.After(3 * time.Second):
-		t.Fatal("server did not initiate shutdown")
+		require.FailNow(t, "server did not initiate shutdown")
 	}
 	select {
 	case err := <-done:
-		t.Fatalf("server stopped before the active request finished: %v", err)
+		require.FailNow(t, "server stopped before the active request finished", "error: %v", err)
 	case <-time.After(50 * time.Millisecond):
 	}
 	release()
-	if err := <-requestDone; err != nil {
-		t.Fatalf("active request was interrupted: %v", err)
-	}
+	assert.NoError(t, <-requestDone, "active request was interrupted")
 	select {
 	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
 	case <-time.After(3 * time.Second):
-		t.Fatal("server did not finish shutdown")
+		require.FailNow(t, "server did not finish shutdown")
 	}
 }

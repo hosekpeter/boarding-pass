@@ -1,9 +1,11 @@
 package config
 
 import (
-	"strings"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func validConfig() Config {
@@ -27,9 +29,8 @@ func defaultEnvironment(t *testing.T) {
 func TestLoadDefaults(t *testing.T) {
 	defaultEnvironment(t)
 	cfg, err := Load()
-	if err != nil || cfg != validConfig() {
-		t.Fatalf("unexpected default configuration: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, validConfig(), cfg)
 }
 
 func TestLoadOverrides(t *testing.T) {
@@ -48,9 +49,8 @@ func TestLoadOverrides(t *testing.T) {
 		Host: "db.internal", Port: 55432, User: "custom", Password: "p@ss + word", Name: "passes", SSLMode: "require", Schema: "custom",
 		MaxConns: 8, MinConns: 0, StatementTimeout: 2 * time.Second, ConnectTimeout: 3 * time.Second,
 	}}
-	if err != nil || cfg != want {
-		t.Fatalf("environment overrides were not loaded: %v", err)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, want, cfg)
 }
 
 func TestInvalidEnvironment(t *testing.T) {
@@ -86,12 +86,14 @@ func TestInvalidEnvironment(t *testing.T) {
 			t.Setenv("DB_PASSWORD", "secret")
 			t.Setenv(tc.key, tc.value)
 			cfg, err := Load()
-			if err == nil || !(strings.Contains(err.Error(), tc.key) || tc.name == "DB nonnumeric port" && strings.Contains(err.Error(), `field "Port"`)) || cfg != (Config{}) {
-				t.Fatalf("expected invalid %s: %v", tc.key, err)
+			require.Error(t, err)
+			assert.Zero(t, cfg)
+			if tc.name == "DB nonnumeric port" {
+				assert.ErrorContains(t, err, `field "Port"`)
+			} else {
+				assert.ErrorContains(t, err, tc.key)
 			}
-			if strings.Contains(err.Error(), "secret") {
-				t.Fatal("configuration error exposed a secret")
-			}
+			assert.NotContains(t, err.Error(), "secret")
 		})
 	}
 }
@@ -101,21 +103,15 @@ func TestValidListenAddresses(t *testing.T) {
 		t.Run(address, func(t *testing.T) {
 			cfg := validConfig()
 			cfg.HTTPAddr = address
-			if err := cfg.Validate(); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, cfg.Validate())
 		})
 	}
 }
 
 func TestValidationCollectsMissingFields(t *testing.T) {
 	err := (Config{}).Validate()
-	if err == nil {
-		t.Fatal("accepted empty configuration")
-	}
+	require.Error(t, err)
 	for _, key := range []string{"DB_HOST", "DB_PORT", "DB_USER", "DB_NAME", "DB_SSLMODE", "LOCATIONS_BASE_URL", "HTTP_ADDR"} {
-		if !strings.Contains(err.Error(), key) {
-			t.Errorf("missing %s in %v", key, err)
-		}
+		assert.ErrorContains(t, err, key)
 	}
 }

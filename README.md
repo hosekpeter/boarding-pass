@@ -208,6 +208,9 @@ Errors use a consistent JSON envelope:
 
 ## Local tests
 
+All tests use `testify/assert` for result checks and `testify/require` for
+prerequisites that must pass before the test can continue.
+
 These commands run Go on your computer. For Docker-only checks, use the
 [command above](#run-all-checks-docker-only). `make check` and
 `make test-integration` **do not start PostgreSQL automatically**.

@@ -10,6 +10,9 @@ import (
 	"boarding-pass/internal/pdf"
 	"boarding-pass/internal/service"
 	"boarding-pass/internal/store"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type extractorStub struct {
@@ -50,17 +53,14 @@ func TestParseEnrichesBeforeSave(t *testing.T) {
 	repo := &repositoryStub{}
 	parser := service.New(extractorStub{value: validPayload}, airports, repo)
 	pass, err := parser.Parse(context.Background(), []byte("PDF"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	wantOrigin := bcbp.Airport{Code: "KSC", AirportName: "Airport", CityName: "City", Country: "Country"}
 	wantDestination := bcbp.Airport{Code: "PRG", AirportName: "Airport", CityName: "City", Country: "Country"}
-	if pass.Legs[0].Origin != wantOrigin || pass.Legs[0].Destination != wantDestination {
-		t.Fatalf("airport client response was not mapped to the boarding pass: %+v", pass)
-	}
-	if airports.calls != 2 || len(repo.saved) != 1 || repo.saved[0].Legs[0].Origin.Country != "Country" || pass.Legs[0].Destination.Code != "PRG" {
-		t.Fatalf("incomplete enrichment: %+v", pass)
-	}
+	require.Len(t, pass.Legs, 1)
+	assert.Equal(t, wantOrigin, pass.Legs[0].Origin)
+	assert.Equal(t, wantDestination, pass.Legs[0].Destination)
+	assert.Equal(t, 2, airports.calls)
+	assert.Equal(t, []bcbp.BoardingPass{pass}, repo.saved)
 }
 
 func TestFailuresAreNotSaved(t *testing.T) {
@@ -77,12 +77,11 @@ func TestFailuresAreNotSaved(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &repositoryStub{}
 			_, err := service.New(tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(context.Background(), nil)
-			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
-				t.Fatalf("unexpected error: %v", err)
+			require.Error(t, err)
+			if tc.want != nil {
+				assert.ErrorIs(t, err, tc.want)
 			}
-			if len(repo.saved) != 0 {
-				t.Fatal("saved partial result")
-			}
+			assert.Empty(t, repo.saved, "saved partial result")
 		})
 	}
 }
@@ -90,19 +89,14 @@ func TestFailuresAreNotSaved(t *testing.T) {
 func TestSaveFailureIsReturned(t *testing.T) {
 	failure := errors.New("disk full")
 	_, err := service.New(extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(context.Background(), nil)
-	if !errors.Is(err, failure) {
-		t.Fatalf("expected save error, got %v", err)
-	}
+	require.ErrorIs(t, err, failure)
 }
 
 func TestRepeatedAirportsResolvedOnce(t *testing.T) {
 	payload := "M2" + validPayload[2:] + validPayload[23:]
 	airports := &lookupStub{}
 	pass, err := service.New(extractorStub{value: payload}, airports, &repositoryStub{}).Parse(context.Background(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(pass.Legs) != 2 || airports.calls != 2 {
-		t.Fatalf("expected two lookups: %d", airports.calls)
-	}
+	require.NoError(t, err)
+	assert.Len(t, pass.Legs, 2)
+	assert.Equal(t, 2, airports.calls)
 }

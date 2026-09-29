@@ -21,6 +21,9 @@ import (
 	"boarding-pass/internal/dependencies"
 	"boarding-pass/internal/store"
 	"boarding-pass/internal/testutil"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Exercises the actual PDF renderer, PDF417 decoder, BCBP parser, HTTP airport
@@ -32,8 +35,7 @@ func TestSamplePDFEndToEnd(t *testing.T) {
 			"PRG": `{"code":"PRG","type":"airport","name":"Václav Havel Airport Prague","city":{"name":"Prague","country":{"name":"Czechia"}}}`,
 		}
 		result, ok := airports[r.URL.Query().Get("id")]
-		if !ok {
-			t.Errorf("unexpected airport request: %s", r.URL)
+		if !assert.True(t, ok, "unexpected airport request: %s", r.URL) {
 			http.Error(w, "unknown", 404)
 			return
 		}
@@ -46,70 +48,54 @@ func TestSamplePDFEndToEnd(t *testing.T) {
 		HTTPAddr:        "127.0.0.1:0",
 	}
 	scope, err := dependencies.NewServiceScope(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer scope.Close()
 	handler := api.New(scope)
 	data, err := os.ReadFile("../../testdata/boarding_pass.pdf")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
 	file, err := writer.CreateFormFile("file", "../../untrusted-filename.pdf")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := file.Write(data); err != nil {
-		t.Fatal(err)
-	}
-	writer.Close()
+	require.NoError(t, err)
+	_, err = file.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
 	req := httptest.NewRequest("POST", "/boarding-pass/parse-from-file", &body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, req)
-	if response.Code != 200 {
-		t.Fatalf("parse status %d: %s", response.Code, response.Body.String())
-	}
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var result struct {
 		DecodedBCBP bcbp.BoardingPass `json:"decoded_bcbp"`
 	}
-	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
 	pass := result.DecodedBCBP
-	if pass.PassengerName != "CYPRIAN/MICHAL" || len(pass.Legs) != 1 {
-		t.Fatalf("unexpected pass: %+v", pass)
-	}
+	assert.Equal(t, "CYPRIAN/MICHAL", pass.PassengerName)
+	require.Len(t, pass.Legs, 1)
 	leg := pass.Legs[0]
-	if leg.BookingReference != "ZKN85B" || leg.AirlineCode != "FR" || leg.FlightNumber != "7774" || leg.JulianDate != 105 || leg.CabinClass != "economy" || leg.Seat != "29C" || leg.PassengerStatus != "1" || leg.Origin.Code != "KSC" || leg.Origin.Country != "Slovakia" || leg.Destination.Code != "PRG" || leg.Destination.CityName != "Prague" {
-		t.Fatalf("unexpected flight: %+v", leg)
-	}
-	if err := scope.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := scope.Repository().List(t.Context(), store.Filter{Limit: 20}); err == nil {
-		t.Fatal("scope did not close the database")
-	}
+	assert.Equal(t, bcbp.Leg{
+		BookingReference: "ZKN85B", AirlineCode: "FR", FlightNumber: "7774", JulianDate: 105,
+		CabinClass: "economy", Seat: "29C", PassengerStatus: "1",
+		Origin:      bcbp.Airport{Code: "KSC", AirportName: "Košice International", CityName: "Košice", Country: "Slovakia"},
+		Destination: bcbp.Airport{Code: "PRG", AirportName: "Václav Havel Airport Prague", CityName: "Prague", Country: "Czechia"},
+	}, leg)
+	require.NoError(t, scope.Close())
+	_, err = scope.Repository().List(t.Context(), store.Filter{Limit: 20})
+	assert.Error(t, err, "scope did not close the database")
 	reopened, err := dependencies.NewServiceScope(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer reopened.Close()
 	handler = api.New(reopened)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest("GET", "/boarding-passes?passenger_name=cyprian&airline_code=FR&limit=1", nil))
-	if response.Code != 200 {
-		t.Fatalf("list status %d: %s", response.Code, response.Body.String())
-	}
+	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 	var page store.Page
-	if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
-		t.Fatal(err)
-	}
-	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID == "" || page.Items[0].ParsedAt.IsZero() || page.Items[0].DecodedBCBP.PassengerName != pass.PassengerName {
-		t.Fatalf("unexpected saved page: %+v", page)
-	}
+	require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
+	assert.Equal(t, 1, page.Total)
+	require.Len(t, page.Items, 1)
+	assert.NotEmpty(t, page.Items[0].ID)
+	assert.False(t, page.Items[0].ParsedAt.IsZero())
+	assert.Equal(t, pass, page.Items[0].DecodedBCBP)
 }
 
 func TestMultipleLegsEndToEnd(t *testing.T) {
@@ -141,9 +127,7 @@ func TestMultipleLegsEndToEnd(t *testing.T) {
 			defer upstream.Close()
 			cfg := config.Config{Database: testutil.DatabaseConfig(t), LocationBaseURL: upstream.URL, HTTPAddr: "127.0.0.1:0"}
 			scope, err := dependencies.NewServiceScope(t.Context(), cfg)
-			if err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, err)
 			defer scope.Close()
 			handler := api.New(scope)
 			parse := func() *httptest.ResponseRecorder {
@@ -154,46 +138,36 @@ func TestMultipleLegsEndToEnd(t *testing.T) {
 			list := func(query string) store.Page {
 				response := httptest.NewRecorder()
 				handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/boarding-passes"+query, nil))
-				if response.Code != 200 {
-					t.Fatalf("history: %d %s", response.Code, response.Body.String())
-				}
+				require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 				var page store.Page
-				if err := json.Unmarshal(response.Body.Bytes(), &page); err != nil {
-					t.Fatal(err)
-				}
+				require.NoError(t, json.Unmarshal(response.Body.Bytes(), &page))
 				return page
 			}
 			if count == 2 {
 				response := parse()
-				if response.Code != 502 {
-					t.Fatalf("second airport outage: %d %s", response.Code, response.Body.String())
-				}
-				if page := list(""); page.Total != 0 || len(page.Items) != 0 {
-					t.Fatal("saved a partially enriched pass")
-				}
+				assert.Equal(t, http.StatusBadGateway, response.Code, response.Body.String())
+				page := list("")
+				assert.Zero(t, page.Total)
+				assert.Empty(t, page.Items, "saved a partially enriched pass")
 			}
 			response := parse()
-			if response.Code != 200 {
-				t.Fatalf("parse: %d %s", response.Code, response.Body.String())
-			}
+			require.Equal(t, http.StatusOK, response.Code, response.Body.String())
 			var result struct {
 				DecodedBCBP bcbp.BoardingPass `json:"decoded_bcbp"`
 			}
-			if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			if len(result.DecodedBCBP.Legs) != count {
-				t.Fatalf("missing legs: %+v", result)
-			}
+			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &result))
+			require.Len(t, result.DecodedBCBP.Legs, count)
 			for i, leg := range result.DecodedBCBP.Legs {
-				if leg.Origin.Code != codes[i] || leg.Destination.Code != codes[i+1] || leg.AirlineCode != carriers[i] || leg.Origin.AirportName != "Airport" || leg.Destination.Country != "Country" {
-					t.Fatalf("incorrectly enriched leg %d: %+v", i, leg)
-				}
+				assert.Equal(t, codes[i], leg.Origin.Code, "leg %d", i)
+				assert.Equal(t, codes[i+1], leg.Destination.Code, "leg %d", i)
+				assert.Equal(t, carriers[i], leg.AirlineCode, "leg %d", i)
+				assert.Equal(t, "Airport", leg.Origin.AirportName, "leg %d", i)
+				assert.Equal(t, "Country", leg.Destination.Country, "leg %d", i)
 			}
 			page := list("?passenger_name=traveler&airline_code=BA&limit=1")
-			if page.Total != 1 || len(page.Items) != 1 || len(page.Items[0].DecodedBCBP.Legs) != count {
-				t.Fatalf("filter on second leg failed: %+v", page)
-			}
+			assert.Equal(t, 1, page.Total)
+			require.Len(t, page.Items, 1)
+			assert.Len(t, page.Items[0].DecodedBCBP.Legs, count)
 			mu.Lock()
 			defer mu.Unlock()
 			for _, code := range codes[:count+1] {
@@ -201,9 +175,7 @@ func TestMultipleLegsEndToEnd(t *testing.T) {
 				if count == 2 && code == "PRG" {
 					want = 2
 				}
-				if calls[code] != want {
-					t.Errorf("airport %s requested %d times, expected %d", code, calls[code], want)
-				}
+				assert.Equal(t, want, calls[code], "requests for airport %s", code)
 			}
 		})
 	}

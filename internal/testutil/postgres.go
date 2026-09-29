@@ -16,6 +16,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // DatabaseURL creates one schema per test without modifying existing tables.
@@ -23,16 +25,14 @@ import (
 func DatabaseURL(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Fatal("set TEST_DATABASE_URL to run PostgreSQL integration tests (see README)")
-	}
+	require.NotEmpty(t, dsn, "set TEST_DATABASE_URL to run PostgreSQL integration tests (see README)")
 	u, err := url.Parse(dsn)
 	if err != nil || (u.Scheme != "postgres" && u.Scheme != "postgresql") || u.Hostname() == "" || strings.Trim(u.Path, "/") == "" {
-		t.Fatal("TEST_DATABASE_URL must be a PostgreSQL URL with a host and database name")
+		require.FailNow(t, "TEST_DATABASE_URL must be a PostgreSQL URL with a host and database name")
 	}
 	cfg, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		t.Fatal("invalid TEST_DATABASE_URL connection settings")
+		require.FailNow(t, "invalid TEST_DATABASE_URL connection settings")
 	}
 	admin := stdlib.OpenDB(*cfg)
 	t.Cleanup(func() { _ = admin.Close() })
@@ -40,15 +40,13 @@ func DatabaseURL(t *testing.T) string {
 	defer cancel()
 	schema := "test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
 	identifier := pgx.Identifier{schema}.Sanitize()
-	if _, err := admin.ExecContext(ctx, "CREATE SCHEMA "+identifier); err != nil {
-		t.Fatalf("create isolated test schema: %v", err)
-	}
+	_, err = admin.ExecContext(ctx, "CREATE SCHEMA "+identifier)
+	require.NoError(t, err, "create isolated test schema")
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if _, err := admin.ExecContext(ctx, "DROP SCHEMA "+identifier+" CASCADE"); err != nil {
-			t.Errorf("remove isolated test schema: %v", err)
-		}
+		_, err := admin.ExecContext(ctx, "DROP SCHEMA "+identifier+" CASCADE")
+		assert.NoError(t, err, "remove isolated test schema")
 	})
 	query := u.Query()
 	query.Set("search_path", schema)
@@ -63,7 +61,7 @@ func DatabaseConfig(t *testing.T) config.DBConfig {
 	u, _ := url.Parse(dsn)
 	parsed, err := pgx.ParseConfig(dsn)
 	if err != nil {
-		t.Fatal("invalid test database connection settings")
+		require.FailNow(t, "invalid test database connection settings")
 	}
 	sslMode := u.Query().Get("sslmode")
 	if sslMode == "" {

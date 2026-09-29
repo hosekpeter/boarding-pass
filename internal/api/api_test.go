@@ -20,6 +20,9 @@ import (
 	"boarding-pass/internal/pdf"
 	"boarding-pass/internal/service"
 	"boarding-pass/internal/store"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type parserStub struct {
@@ -55,16 +58,11 @@ func upload(t *testing.T, fields []string, body []byte) *http.Request {
 	writer := multipart.NewWriter(&data)
 	for _, field := range fields {
 		f, err := writer.CreateFormFile(field, "boarding.pdf")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := f.Write(body); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, err)
+		_, err = f.Write(body)
+		require.NoError(t, err)
 	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, writer.Close())
 	req := httptest.NewRequest(http.MethodPost, "/boarding-pass/parse-from-file", &data)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	return req
@@ -92,18 +90,12 @@ func TestParseUploadValidation(t *testing.T) {
 			handler := newTestAPI(parser, &repoStub{}, logger())
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, upload(t, tc.fields, tc.body))
-			if resp.Code != tc.status {
-				t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
-			}
+			assert.Equal(t, tc.status, resp.Code, resp.Body.String())
 			if tc.code != "" {
 				assertError(t, resp, tc.code)
-				if parser.calls != 0 {
-					t.Fatal("parsed an invalid upload")
-				}
+				assert.Zero(t, parser.calls, "parsed an invalid upload")
 			}
-			if resp.Header().Get("Cache-Control") != "no-store" {
-				t.Fatal("missing privacy header")
-			}
+			assert.Equal(t, "no-store", resp.Header().Get("Cache-Control"))
 		})
 	}
 }
@@ -124,13 +116,9 @@ func TestErrorMapping(t *testing.T) {
 			handler := newTestAPI(&parserStub{err: tc.err}, &repoStub{}, logger())
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, upload(t, []string{"file"}, []byte("%PDF-1.4")))
-			if resp.Code != tc.status {
-				t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
-			}
+			assert.Equal(t, tc.status, resp.Code, resp.Body.String())
 			assertError(t, resp, tc.code)
-			if strings.Contains(resp.Body.String(), "private database") {
-				t.Fatal("exposed internal failure")
-			}
+			assert.NotContains(t, resp.Body.String(), "private database")
 		})
 	}
 }
@@ -141,21 +129,14 @@ func TestListFiltersAndErrors(t *testing.T) {
 		handler := newTestAPI(&parserStub{}, repo, logger())
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/boarding-passes"+query, nil))
-		if resp.Code != 200 {
-			t.Fatalf("status %d", resp.Code)
-		}
+		require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
 		var page store.Page
-		if err := json.Unmarshal(resp.Body.Bytes(), &page); err != nil {
-			t.Fatal(err)
-		}
-		if page.Items == nil {
-			t.Fatal("items must be an array")
-		}
-		if query == "" && repo.filter.Limit != 20 {
-			t.Fatal("wrong default limit")
-		}
-		if query != "" && repo.filter != (store.Filter{Limit: 2, Offset: 3, PassengerName: "cyprian", AirlineCode: "FR"}) {
-			t.Fatalf("wrong filter: %+v", repo.filter)
+		require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &page))
+		assert.NotNil(t, page.Items, "items must be an array")
+		if query == "" {
+			assert.Equal(t, 20, repo.filter.Limit)
+		} else {
+			assert.Equal(t, store.Filter{Limit: 2, Offset: 3, PassengerName: "cyprian", AirlineCode: "FR"}, repo.filter)
 		}
 	}
 	for _, query := range []string{"limit=0", "limit=101", "limit=nope", "limit=", "offset=-1", "offset=2147483648", "limit=1&limit=2", "unknown=yes", "airline_code=TOOLONG", "passenger_name=%ZZ"} {
@@ -163,9 +144,7 @@ func TestListFiltersAndErrors(t *testing.T) {
 			handler := newTestAPI(&parserStub{}, &repoStub{}, logger())
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/boarding-passes?"+query, nil))
-			if resp.Code != 400 {
-				t.Fatalf("status %d: %s", resp.Code, resp.Body.String())
-			}
+			assert.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
 			assertError(t, resp, "invalid_query")
 		})
 	}
@@ -183,17 +162,13 @@ func TestRoutesAndContentType(t *testing.T) {
 	} {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, httptest.NewRequest(tc.method, tc.path, nil))
-		if resp.Code != tc.status {
-			t.Fatalf("%s %s returned %d", tc.method, tc.path, resp.Code)
-		}
+		assert.Equal(t, tc.status, resp.Code, "%s %s", tc.method, tc.path)
 	}
 	req := httptest.NewRequest("POST", "/boarding-pass/parse-from-file", strings.NewReader("bad multipart"))
 	req.Header.Set("Content-Type", "multipart/form-data; boundary=missing")
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, req)
-	if resp.Code != 400 {
-		t.Fatalf("malformed multipart returned %d", resp.Code)
-	}
+	assert.Equal(t, http.StatusBadRequest, resp.Code, "malformed multipart")
 }
 
 type blockingParser struct{ started, release chan struct{} }
@@ -218,9 +193,8 @@ func TestConcurrentParseLimit(t *testing.T) {
 	close(parser.release)
 	<-done
 	<-done
-	if resp.Code != 503 || resp.Header().Get("Retry-After") != "1" {
-		t.Fatalf("unexpected overload response: %d", resp.Code)
-	}
+	assert.Equal(t, http.StatusServiceUnavailable, resp.Code)
+	assert.Equal(t, "1", resp.Header().Get("Retry-After"))
 }
 
 func assertError(t *testing.T, resp *httptest.ResponseRecorder, code string) {
@@ -228,12 +202,9 @@ func assertError(t *testing.T, resp *httptest.ResponseRecorder, code string) {
 	var envelope struct {
 		Error struct{ Code, Message string }
 	}
-	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err != nil {
-		t.Fatal(err)
-	}
-	if envelope.Error.Code != code || envelope.Error.Message == "" {
-		t.Fatalf("unexpected error: %s", resp.Body.String())
-	}
+	require.NoError(t, json.Unmarshal(resp.Body.Bytes(), &envelope))
+	assert.Equal(t, code, envelope.Error.Code)
+	assert.NotEmpty(t, envelope.Error.Message)
 }
 
 type apiScopeStub struct {
@@ -264,9 +235,8 @@ func TestInvalidTextFiltersDoNotReachRepository(t *testing.T) {
 			handler := newTestAPI(&parserStub{}, repo, logger())
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/boarding-passes?"+query, nil))
-			if resp.Code != 400 || repo.calls != 0 {
-				t.Fatalf("status %d, repository calls %d: %s", resp.Code, repo.calls, resp.Body.String())
-			}
+			assert.Equal(t, http.StatusBadRequest, resp.Code, resp.Body.String())
+			assert.Zero(t, repo.calls)
 			assertError(t, resp, "invalid_query")
 		})
 	}

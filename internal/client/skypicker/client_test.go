@@ -2,7 +2,6 @@ package skypicker
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +10,9 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const airportJSON = `{"locations":[{"code":"PRG","type":"airport","name":"Václav Havel Airport Prague","city":{"name":"Prague","country":{"name":"Czechia"}}}]}`
@@ -19,39 +21,27 @@ func TestLookupAndCache(t *testing.T) {
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/locations/id" || r.URL.Query().Get("id") != "PRG" {
-			t.Errorf("unexpected URL: %s", r.URL)
-		}
+		assert.Equal(t, "/locations/id", r.URL.Path)
+		assert.Equal(t, "PRG", r.URL.Query().Get("id"))
 		fmt.Fprint(w, airportJSON)
 	}))
 	defer server.Close()
 	client, err := New(server.URL, server.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	for i := 0; i < 2; i++ {
 		airport, err := client.Lookup(context.Background(), "PRG")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if airport.Code != "PRG" || airport.CityName != "Prague" || airport.Country != "Czechia" || airport.AirportName != "Václav Havel Airport Prague" {
-			t.Fatalf("unexpected airport: %+v", airport)
-		}
+		require.NoError(t, err)
+		assert.Equal(t, Airport{Code: "PRG", CityName: "Prague", Country: "Czechia", AirportName: "Václav Havel Airport Prague"}, airport)
 	}
-	if calls.Load() != 1 {
-		t.Fatalf("cache missed: %d calls", calls.Load())
-	}
+	assert.Equal(t, int32(1), calls.Load(), "cache missed")
 	client.mu.Lock()
 	entry := client.cache["PRG"]
 	entry.expires = time.Now().Add(-time.Second)
 	client.cache["PRG"] = entry
 	client.mu.Unlock()
-	if _, err := client.Lookup(context.Background(), "PRG"); err != nil {
-		t.Fatal(err)
-	}
-	if calls.Load() != 2 {
-		t.Fatal("expired entry was reused")
-	}
+	_, err = client.Lookup(context.Background(), "PRG")
+	require.NoError(t, err)
+	assert.Equal(t, int32(2), calls.Load(), "expired entry was reused")
 }
 
 func TestLookupFailuresAreNotCached(t *testing.T) {
@@ -75,15 +65,13 @@ func TestLookupFailuresAreNotCached(t *testing.T) {
 				fmt.Fprint(w, tc.body)
 			}))
 			defer server.Close()
-			client, _ := New(server.URL, server.Client())
+			client, err := New(server.URL, server.Client())
+			require.NoError(t, err)
 			for i := 0; i < 2; i++ {
-				if _, err := client.Lookup(context.Background(), "PRG"); !errors.Is(err, ErrUnavailable) {
-					t.Fatalf("expected lookup error: %v", err)
-				}
+				_, err = client.Lookup(context.Background(), "PRG")
+				require.ErrorIs(t, err, ErrUnavailable)
 			}
-			if calls != 2 {
-				t.Fatal("cached a failure")
-			}
+			assert.Equal(t, 2, calls, "cached a failure")
 		})
 	}
 }
@@ -91,24 +79,22 @@ func TestLookupFailuresAreNotCached(t *testing.T) {
 func TestLookupCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer server.Close()
-	client, _ := New(server.URL, server.Client())
+	client, err := New(server.URL, server.Client())
+	require.NoError(t, err)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	if _, err := client.Lookup(ctx, "PRG"); err == nil {
-		t.Fatal("expected timeout")
-	}
+	_, err = client.Lookup(ctx, "PRG")
+	assert.Error(t, err, "expected timeout")
 	canceled, stop := context.WithCancel(context.Background())
 	stop()
-	if _, err := client.Lookup(canceled, "PRG"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected cancellation: %v", err)
-	}
+	_, err = client.Lookup(canceled, "PRG")
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestInvalidBaseURL(t *testing.T) {
 	for _, url := range []string{"", "://bad", "file:///tmp/data", "https://example.com?secret=yes", "https://example.com?", "https://user:password@example.com", "https://example.com#fragment"} {
-		if _, err := New(url, nil); err == nil {
-			t.Errorf("accepted URL %q", url)
-		}
+		_, err := New(url, nil)
+		assert.Error(t, err, "accepted URL %q", url)
 	}
 }
 
@@ -120,24 +106,19 @@ func TestConcurrentReuse(t *testing.T) {
 	}))
 	defer server.Close()
 	client, err := New(server.URL, server.Client())
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	var wg sync.WaitGroup
 	for range 20 {
 		wg.Go(func() {
 			airport, err := client.Lookup(t.Context(), "PRG")
-			if err != nil || airport.Code != "PRG" {
-				t.Errorf("concurrent lookup failed: %v", err)
+			if assert.NoError(t, err, "concurrent lookup failed") {
+				assert.Equal(t, "PRG", airport.Code)
 			}
 		})
 	}
 	wg.Wait()
 	before := calls.Load()
-	if _, err := client.Lookup(t.Context(), "PRG"); err != nil {
-		t.Fatal(err)
-	}
-	if calls.Load() != before {
-		t.Fatal("shared client did not reuse cached result")
-	}
+	_, err = client.Lookup(t.Context(), "PRG")
+	require.NoError(t, err)
+	assert.Equal(t, before, calls.Load(), "shared client did not reuse cached result")
 }

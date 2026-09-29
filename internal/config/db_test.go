@@ -1,10 +1,11 @@
 package config
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestConnectionString(t *testing.T) {
@@ -16,19 +17,16 @@ func TestConnectionString(t *testing.T) {
 			cfg.Database.Password = "p@ss +:/?#%word"
 			cfg.Database.Name = "passes /?#%+"
 			cfg.Database.Schema = "schema with spaces"
-			if err := cfg.Validate(); err != nil {
-				t.Fatal(err)
-			}
+			require.NoError(t, cfg.Validate())
 			parsed, err := pgx.ParseConfig(cfg.Database.ConnectionString())
-			if err != nil {
-				t.Fatal("generated connection string is invalid")
-			}
-			if parsed.Host != host || int(parsed.Port) != cfg.Database.Port || parsed.User != cfg.Database.User || parsed.Password != cfg.Database.Password || parsed.Database != cfg.Database.Name {
-				t.Fatal("connection string changed a connection parameter")
-			}
-			if parsed.RuntimeParams["statement_timeout"] != "5000" || parsed.RuntimeParams["search_path"] != `"schema with spaces"` {
-				t.Fatalf("connection string lost query settings: %q", parsed.RuntimeParams)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, host, parsed.Host)
+			assert.Equal(t, cfg.Database.Port, int(parsed.Port))
+			assert.Equal(t, cfg.Database.User, parsed.User)
+			assert.Equal(t, cfg.Database.Password, parsed.Password)
+			assert.Equal(t, cfg.Database.Name, parsed.Database)
+			assert.Equal(t, "5000", parsed.RuntimeParams["statement_timeout"])
+			assert.Equal(t, `"schema with spaces"`, parsed.RuntimeParams["search_path"])
 		})
 	}
 }
@@ -40,9 +38,9 @@ func TestDatabaseFieldsCannotContainNUL(t *testing.T) {
 			fields := map[string]*string{"DB_USER": &cfg.Database.User, "DB_PASSWORD": &cfg.Database.Password, "DB_NAME": &cfg.Database.Name, "DB_SCHEMA": &cfg.Database.Schema}
 			*fields[field] = "secret\x00value"
 			err := cfg.Validate()
-			if err == nil || !strings.Contains(err.Error(), field) || strings.Contains(err.Error(), "secret") {
-				t.Fatal("invalid database field was accepted or exposed")
-			}
+			require.Error(t, err)
+			assert.ErrorContains(t, err, field)
+			assert.NotContains(t, err.Error(), "secret")
 		})
 	}
 }

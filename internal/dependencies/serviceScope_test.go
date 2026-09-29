@@ -2,13 +2,13 @@ package dependencies_test
 
 import (
 	"context"
-	"errors"
-	"strings"
 	"testing"
 	"time"
 
 	"boarding-pass/internal/config"
 	"boarding-pass/internal/dependencies"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestCanceledStartupDoesNotConnect(t *testing.T) {
@@ -20,9 +20,8 @@ func TestCanceledStartupDoesNotConnect(t *testing.T) {
 		HTTPAddr:        config.DefaultHTTPAddr,
 	}
 	scope, err := dependencies.NewServiceScope(ctx, cfg)
-	if !errors.Is(err, context.Canceled) || scope != nil {
-		t.Fatalf("scope = %v, error = %v", scope, err)
-	}
+	assert.Nil(t, scope)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestMissingPDFToolsFailsBeforeDatabaseConnection(t *testing.T) {
@@ -33,9 +32,8 @@ func TestMissingPDFToolsFailsBeforeDatabaseConnection(t *testing.T) {
 		HTTPAddr:        config.DefaultHTTPAddr,
 	}
 	scope, err := dependencies.NewServiceScope(t.Context(), cfg)
-	if err == nil || scope != nil || !strings.Contains(err.Error(), "initialize PDF extractor") {
-		t.Fatalf("scope = %v, error = %v", scope, err)
-	}
+	assert.Nil(t, scope)
+	assert.ErrorContains(t, err, "initialize PDF extractor")
 }
 
 func TestInvalidConfigurationFailsBeforeResourceInitialization(t *testing.T) {
@@ -46,9 +44,8 @@ func TestInvalidConfigurationFailsBeforeResourceInitialization(t *testing.T) {
 		HTTPAddr:        "not-an-address",
 	}
 	scope, err := dependencies.NewServiceScope(t.Context(), cfg)
-	if scope != nil || err == nil || !strings.Contains(err.Error(), "HTTP_ADDR") {
-		t.Fatalf("scope = %v, error = %v", scope, err)
-	}
+	assert.Nil(t, scope)
+	assert.ErrorContains(t, err, "HTTP_ADDR")
 }
 
 func unreachableDatabase() config.DBConfig {

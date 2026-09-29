@@ -4,13 +4,15 @@ package pdf
 
 import (
 	"context"
-	"errors"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"boarding-pass/internal/testutil"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Race detection and coverage make decoding slower on shared CI runners.
@@ -18,13 +20,9 @@ const pdfTestTimeout = time.Minute
 
 func TestRealPDFExtraction(t *testing.T) {
 	extractor, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	sample, err := os.ReadFile("../../testdata/boarding_pass.pdf")
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	payload := "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 100"
 	other := strings.Replace(payload, "CYPRIAN/MICHAL", "EXAMPLE/ALICE ", 1)
 	tests := []struct {
@@ -46,11 +44,9 @@ func TestRealPDFExtraction(t *testing.T) {
 			ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
 			defer cancel()
 			result, err := extractor.Extract(ctx, tc.data)
-			if !errors.Is(err, tc.want) {
-				t.Fatalf("error = %v, want %v", err, tc.want)
-			}
-			if tc.want == nil && !strings.Contains(result, tc.contains) {
-				t.Fatalf("unexpected payload %q", result)
+			require.ErrorIs(t, err, tc.want)
+			if tc.want == nil {
+				assert.Contains(t, result, tc.contains)
 			}
 		})
 	}
@@ -58,9 +54,7 @@ func TestRealPDFExtraction(t *testing.T) {
 
 func TestBarcodeOrientationsOnSamePage(t *testing.T) {
 	extractor, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	payload := "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 100"
 	other := strings.Replace(payload, "CYPRIAN/MICHAL", "EXAMPLE/ALICE ", 1)
 	for _, transform := range []string{"1 0 0 1 30 450", "0 1 -1 0 730 30", "-1 0 0 -1 730 730", "0 -1 1 0 500 730"} {
@@ -82,11 +76,10 @@ func TestBarcodeOrientationsOnSamePage(t *testing.T) {
 				defer cancel()
 				result, err := extractor.Extract(ctx, data)
 				if duplicate {
-					if err != nil || result != payload {
-						t.Fatalf("duplicate barcode: %q, %v", result, err)
-					}
-				} else if !errors.Is(err, ErrMultiple) {
-					t.Fatalf("distinct barcodes returned %q, %v", result, err)
+					require.NoError(t, err)
+					assert.Equal(t, payload, result)
+				} else {
+					assert.ErrorIs(t, err, ErrMultiple)
 				}
 			})
 		}

@@ -11,7 +11,10 @@ import (
 	"boarding-pass/internal/config"
 	"boarding-pass/internal/db"
 	"boarding-pass/internal/testutil"
+
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestPersistenceFiltersAndPagination(t *testing.T) {
@@ -23,9 +26,7 @@ func TestPersistenceFiltersAndPagination(t *testing.T) {
 		{PassengerName: "SMITH/JANE", Legs: []bcbp.Leg{{AirlineCode: "BA"}, {AirlineCode: "FR"}}},
 		{PassengerName: "CYPRIAN/JAN", Legs: []bcbp.Leg{{AirlineCode: "BA"}}},
 	} {
-		if err := s.Save(ctx, pass); err != nil {
-			t.Fatal(err)
-		}
+		require.NoError(t, s.Save(ctx, pass))
 	}
 	pool.Close()
 	s, pool = openTestStore(t, cfg)
@@ -49,16 +50,14 @@ func TestPersistenceFiltersAndPagination(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			page, err := s.List(ctx, tc.filter)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if page.Total != tc.total || len(page.Items) != len(tc.names) || page.Items == nil {
-				t.Fatalf("unexpected page: %+v", page)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tc.total, page.Total)
+			assert.NotNil(t, page.Items)
+			require.Len(t, page.Items, len(tc.names))
 			for i, r := range page.Items {
-				if r.DecodedBCBP.PassengerName != tc.names[i] || r.ID == "" || r.ParsedAt.IsZero() {
-					t.Fatalf("unexpected record: %+v", r)
-				}
+				assert.Equal(t, tc.names[i], r.DecodedBCBP.PassengerName)
+				assert.NotEmpty(t, r.ID)
+				assert.False(t, r.ParsedAt.IsZero())
 			}
 		})
 	}
@@ -72,24 +71,17 @@ func TestConcurrentSaves(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := s.Save(context.Background(), bcbp.BoardingPass{PassengerName: "TEST/USER", Legs: []bcbp.Leg{}}); err != nil {
-				t.Error(err)
-			}
+			assert.NoError(t, s.Save(context.Background(), bcbp.BoardingPass{PassengerName: "TEST/USER", Legs: []bcbp.Leg{}}))
 		}()
 	}
 	wg.Wait()
 	page, err := s.List(context.Background(), Filter{Limit: 100})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.Total != 20 || len(page.Items) != 20 {
-		t.Fatalf("lost writes: %+v", page)
-	}
+	require.NoError(t, err)
+	assert.Equal(t, 20, page.Total)
+	assert.Len(t, page.Items, 20)
 	ids := map[string]bool{}
 	for _, r := range page.Items {
-		if ids[r.ID] {
-			t.Fatal("duplicate ID")
-		}
+		assert.NotContains(t, ids, r.ID, "duplicate ID")
 		ids[r.ID] = true
 	}
 }
@@ -99,15 +91,11 @@ func TestCanceledAndInvalidQueries(t *testing.T) {
 	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := s.Save(ctx, bcbp.BoardingPass{}); err == nil {
-		t.Fatal("expected canceled save")
-	}
-	if _, err := s.List(ctx, Filter{Limit: 20}); err == nil {
-		t.Fatal("expected canceled list")
-	}
-	if _, err := s.List(context.Background(), Filter{Limit: 0}); err == nil {
-		t.Fatal("expected invalid limit")
-	}
+	assert.Error(t, s.Save(ctx, bcbp.BoardingPass{}), "expected canceled save")
+	_, err := s.List(ctx, Filter{Limit: 20})
+	assert.Error(t, err, "expected canceled list")
+	_, err = s.List(context.Background(), Filter{Limit: 0})
+	assert.Error(t, err, "expected invalid limit")
 }
 
 func TestConcurrentInitialization(t *testing.T) {
@@ -116,19 +104,16 @@ func TestConcurrentInitialization(t *testing.T) {
 	for range 4 {
 		wg.Go(func() {
 			pool, err := db.Connect(t.Context(), cfg)
-			if err != nil {
-				t.Errorf("concurrent initialization: %v", err)
+			if !assert.NoError(t, err, "concurrent initialization") {
 				return
 			}
 			defer pool.Close()
-			if err := db.RunMigrations(t.Context(), pool); err != nil {
-				t.Errorf("concurrent migrations: %v", err)
+			if !assert.NoError(t, db.RunMigrations(t.Context(), pool), "concurrent migrations") {
 				return
 			}
 			s := New(pool)
-			if _, err := s.List(t.Context(), Filter{Limit: 20}); err != nil {
-				t.Errorf("read initialized schema: %v", err)
-			}
+			_, err = s.List(t.Context(), Filter{Limit: 20})
+			assert.NoError(t, err, "read initialized schema")
 		})
 	}
 	wg.Wait()
@@ -137,12 +122,8 @@ func TestConcurrentInitialization(t *testing.T) {
 func openTestStore(t *testing.T, cfg config.DBConfig) (*Store, *pgxpool.Pool) {
 	t.Helper()
 	pool, err := db.Connect(t.Context(), cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	t.Cleanup(pool.Close)
-	if err := db.RunMigrations(t.Context(), pool); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, db.RunMigrations(t.Context(), pool))
 	return New(pool), pool
 }
