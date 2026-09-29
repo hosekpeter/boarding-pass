@@ -1,7 +1,7 @@
 POSTGRES_PORT ?= 5432
 export TEST_DATABASE_URL ?= postgres://boarding_pass:boarding_pass@127.0.0.1:$(POSTGRES_PORT)/boarding_pass?sslmode=disable
 
-.PHONY: run build test test-integration check check-docker fuzz bench bench-compare
+.PHONY: run build test test-integration check check-docker fuzz
 run:
 	go run .
 build:
@@ -19,12 +19,3 @@ check-docker:
 		docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from check --attach check
 fuzz:
 	go test ./internal/bcbp -fuzz=FuzzParse -fuzztime=10s
-
-# Run without -race or coverage; those flags distort performance measurements.
-bench:
-	go test ./benchmarks -run '^$$' -bench . -benchmem -benchtime=500ms -count=5 -cpu=1
-
-PYTHON ?= python3
-PYTHON_PROJECT ?= ../boarding-pass-python
-bench-compare:
-	"$(PYTHON)" benchmarks/compare.py --python-project "$(PYTHON_PROJECT)"
