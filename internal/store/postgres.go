@@ -18,8 +18,8 @@ type Store struct{ db *pgxpool.Pool }
 var _ Repository = (*Store)(nil)
 
 type Record struct {
-	ID          string            `json:"id"`
-	ParsedAt    time.Time         `json:"parsed_at"`
+	ID          string            `json:"id" format:"uuid"`
+	ParsedAt    time.Time         `json:"parsed_at" format:"date-time"`
 	DecodedBCBP bcbp.BoardingPass `json:"decoded_bcbp"`
 }
 
@@ -32,9 +32,9 @@ type Filter struct {
 
 type Page struct {
 	Items  []Record `json:"items"`
-	Total  int      `json:"total"`
-	Limit  int      `json:"limit"`
-	Offset int      `json:"offset"`
+	Total  int      `json:"total" minimum:"0"`
+	Limit  int      `json:"limit" minimum:"1" maximum:"100" example:"20"`
+	Offset int      `json:"offset" minimum:"0" maximum:"2147483647" example:"0"`
 }
 
 // New uses the pool owned by ServiceScope; migrations run before construction.

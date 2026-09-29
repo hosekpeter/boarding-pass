@@ -1,7 +1,6 @@
 package api
 
 import (
-	"boarding-pass/internal/dependencies"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,12 +14,13 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"boarding-pass/docs"
-	"boarding-pass/internal/bcbp"
 	"boarding-pass/internal/client/skypicker"
+	"boarding-pass/internal/dependencies"
 	"boarding-pass/internal/pdf"
 	"boarding-pass/internal/service"
 	"boarding-pass/internal/store"
+
+	swaggerFiles "github.com/swaggo/files/v2"
 )
 
 const MaxUploadBytes int64 = 10 << 20
@@ -33,6 +33,15 @@ type API struct {
 	slots      chan struct{}
 }
 
+// New constructs the HTTP API.
+//
+// @title Boarding Pass API
+// @version 1.0.0
+// @description Parse a PDF417 boarding pass from PDF and retain successfully parsed results.
+// @servers.url /
+// @servers.description Current server
+// @externalDocs.description Original assignment
+// @externalDocs.url https://github.com/mcyprian/interview_task/blob/main/Boarding_Pass_Parsing_Task.md
 func New(scope dependencies.ServiceScope) http.Handler {
 	a := &API{
 		parser:     scope.Parser(),
@@ -44,13 +53,14 @@ func New(scope dependencies.ServiceScope) http.Handler {
 
 	mux.HandleFunc("/boarding-pass/parse-from-file", method(http.MethodPost, a.parse))
 	mux.HandleFunc("/boarding-passes", method(http.MethodGet, a.list))
-	mux.HandleFunc("/healthz", method(http.MethodGet, func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	}))
-	mux.HandleFunc("/openapi.yaml", method(http.MethodGet, func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/yaml")
-		_, _ = w.Write(docs.OpenAPI)
-	}))
+	mux.HandleFunc("/healthz", method(http.MethodGet, health))
+	mux.HandleFunc("/openapi.yaml", method(http.MethodGet, openAPI))
+	mux.HandleFunc("/documentation", method(http.MethodGet, documentation))
+	mux.HandleFunc("/documentation/{$}", method(http.MethodGet, documentation))
+	mux.HandleFunc("/documentation/swagger.json", method(http.MethodGet, specJSON))
+	mux.HandleFunc("/documentation/swagger.yaml", method(http.MethodGet, specYAML))
+	mux.HandleFunc("/documentation/", method(http.MethodGet,
+		http.StripPrefix("/documentation/", http.FileServer(http.FS(swaggerFiles.FS))).ServeHTTP))
 	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Endpoint not found")
 	})
@@ -78,6 +88,27 @@ func method(want string, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// @Summary Decode and save one boarding pass
+// @Description Accepts a PDF of up to 10 pages. The complete multipart request must fit within 10 MiB. Repeated identical barcodes are accepted; distinct barcodes in the same document are rejected.
+// @Description Each successful call creates a new history entry, including repeated uploads. Processing has a 30-second context deadline. Airport lookup failures do not save partial records.
+// @ID parseBoardingPass
+// @Tags Boarding passes
+// @Accept multipart/form-data
+// @Produce json
+// @Param file formData file true "Exactly one PDF file; complete request limited to 10 MiB"
+// @Success 200 {object} ParsedPass "Decoded and committed to history"
+// @Failure 400 {object} ErrorResponse "Malformed multipart, missing or duplicate file, or empty upload"
+// @Failure 405 {object} ErrorResponse "Method not allowed"
+// @Failure 408 {object} ErrorResponse "Request canceled"
+// @Failure 413 {object} ErrorResponse "Multipart request exceeds 10 MiB"
+// @Failure 415 {object} ErrorResponse "Expected multipart/form-data containing a PDF"
+// @Failure 422 {object} ErrorResponse "Invalid PDF, too many pages, missing or ambiguous PDF417 barcode, or invalid BCBP"
+// @Failure 500 {object} ErrorResponse "Internal processing or persistence failure"
+// @Failure 502 {object} ErrorResponse "Airport information is unavailable"
+// @Failure 503 {object} ErrorResponse "Both processing slots are busy; retry after one second"
+// @Header 503 {integer} Retry-After "Seconds to wait before retrying (1)"
+// @Failure 504 {object} ErrorResponse "Processing timed out"
+// @Router /boarding-pass/parse-from-file [post]
 func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 	select {
 	case a.slots <- struct{}{}:
@@ -150,11 +181,26 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, struct {
-		DecodedBCBP bcbp.BoardingPass `json:"decoded_bcbp"`
-	}{pass})
+	writeJSON(w, http.StatusOK, ParsedPass{DecodedBCBP: pass})
 }
 
+// @Summary List previously parsed boarding passes, newest first
+// @Description Filters are combined with AND. Total counts all matching records before pagination. Equal timestamps are ordered by insertion sequence, newest first.
+// @Description Unknown or repeated query parameters, invalid UTF-8, and NUL characters are rejected. String filter limits are measured in UTF-8 bytes.
+// @ID listBoardingPasses
+// @Tags Boarding passes
+// @Produce json
+// @Param limit query int false "Maximum records to return" minimum(1) maximum(100) default(20)
+// @Param offset query int false "Matching records to skip" minimum(0) maximum(2147483647) default(0)
+// @Param passenger_name query string false "Case-insensitive literal substring of the passenger name; at most 100 UTF-8 bytes" maxLength(100)
+// @Param airline_code query string false "Exact, case-sensitive match on any flight leg; empty means no filter; at most 3 UTF-8 bytes" maxLength(3)
+// @Success 200 {object} store.Page "Matching records"
+// @Failure 400 {object} ErrorResponse "Invalid query parameters"
+// @Failure 405 {object} ErrorResponse "Method not allowed"
+// @Failure 408 {object} ErrorResponse "Request canceled"
+// @Failure 500 {object} ErrorResponse "Internal persistence failure"
+// @Failure 504 {object} ErrorResponse "Query timed out"
+// @Router /boarding-passes [get]
 func (a *API) list(w http.ResponseWriter, r *http.Request) {
 	query, err := parseFilter(r)
 	if err != nil {
@@ -239,7 +285,7 @@ func (a *API) fail(w http.ResponseWriter, err error) {
 }
 
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, map[string]any{"error": map[string]string{"code": code, "message": message}})
+	writeJSON(w, status, ErrorResponse{Error: APIError{Code: code, Message: message}})
 }
 func writeJSON(w http.ResponseWriter, status int, body any) {
 	w.Header().Set("Content-Type", "application/json")

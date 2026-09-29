@@ -24,7 +24,9 @@ Check that the API is ready:
 curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://localhost:8080/healthz
 ```
 
-Expected response: `{"status":"ok"}`. Then try the included boarding pass:
+Expected response: `{"status":"ok"}`. Open [the interactive API documentation](http://localhost:8080/documentation)
+to browse endpoints and use **Try it out**, including uploading a PDF.
+You can also try the included boarding pass with curl:
 
 ```bash
 curl --fail-with-body \
@@ -53,8 +55,8 @@ that history and start with an empty database, use `docker compose down --volume
 ## Run all checks: Docker only
 
 This command builds a test image containing Go and Poppler, starts a separate
-PostgreSQL database, and runs static checks, all unit/integration tests, the Go
-race detector, and coverage:
+PostgreSQL database, checks generated API documentation, and runs static checks,
+all unit/integration tests, the Go race detector, and coverage:
 
 ```bash
 docker compose -f compose.test.yaml up --build --abort-on-container-exit --exit-code-from check --attach check
@@ -186,8 +188,32 @@ combined. `total` is counted before pagination. No matches return `items: []`.
 `limit` defaults to 20 and accepts 1–100; `offset` defaults to 0.
 Each successful POST creates a new history record, even for a repeated upload.
 
-The [OpenAPI 3.0 specification](docs/openapi.yaml) is also served at
-`GET /openapi.yaml`. `GET /healthz` reports process liveness only.
+Swagger UI is served at [`GET /documentation`](http://localhost:8080/documentation).
+Its JavaScript and CSS are embedded in the application; no CDN is needed.
+Requests from **Try it out** use the same server and port as the documentation page.
+The generated OpenAPI 3.1 specification is available as [JSON](docs/swagger.json)
+at `GET /documentation/swagger.json` and [YAML](docs/swagger.yaml) at
+`GET /documentation/swagger.yaml`. The existing `GET /openapi.yaml` URL also serves
+the YAML specification. `GET /healthz` reports process liveness only.
+
+### Generate API documentation
+
+Endpoint descriptions are Swag annotations next to the handlers in `internal/api`.
+Response schemas come from the actual Go response types, including `bcbp.BoardingPass`
+and `store.Page`. After changing an endpoint or response type, run:
+
+```bash
+make docs         # Regenerate docs/swagger.json and docs/swagger.yaml
+make docs-check   # Check that both committed specifications are current
+```
+
+The Makefile pins `SWAG_VERSION` and runs the generator with `go run`; no global Swag
+installation is needed. It uses Swag v2's OpenAPI 3.1 support (currently a release
+candidate); the generator is only used during development and checks. Commit both
+generated files with the code change and rebuild/restart the API to serve them.
+`make check`, Docker checks, and CI
+all reject stale documentation. Running the API from Docker requires no generation
+step: the committed specification and UI are embedded in the binary.
 
 Errors use a consistent JSON envelope:
 
@@ -220,7 +246,7 @@ make test                 # Unit tests and the Go race detector; no database or 
 
 docker compose up -d --wait db
 make test-integration     # PostgreSQL and real PDF tests; requires Poppler
-make check                # Vet, all tests, race detector, coverage.out
+make check                # Documentation freshness, vet, all tests, race detector, coverage.out
 make fuzz                 # Exercise the BCBP parser with generated malformed inputs
 ```
 

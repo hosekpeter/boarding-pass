@@ -8,27 +8,28 @@ import (
 )
 
 type BoardingPass struct {
-	PassengerName string `json:"passenger_name"`
-	Legs          []Leg  `json:"legs"`
+	PassengerName string `json:"passenger_name" example:"CYPRIAN/MICHAL"`
+	Legs          []Leg  `json:"legs" validate:"min=1,max=4"`
 }
 
 type Leg struct {
-	BookingReference string  `json:"booking_reference"`
-	AirlineCode      string  `json:"airline_code"`
-	FlightNumber     string  `json:"flight_number"`
-	JulianDate       int     `json:"julian_date"`
-	CabinClass       string  `json:"cabin_class"`
-	Seat             string  `json:"seat"`
-	PassengerStatus  string  `json:"passenger_status"`
-	Origin           Airport `json:"origin"`
-	Destination      Airport `json:"destination"`
+	BookingReference string `json:"booking_reference" example:"ZKN85B"`
+	AirlineCode      string `json:"airline_code" example:"FR"`
+	FlightNumber     string `json:"flight_number" example:"7774"`
+	// Day of year; BCBP mandatory fields do not carry the flight year.
+	JulianDate      int     `json:"julian_date" minimum:"1" maximum:"366" example:"105"`
+	CabinClass      string  `json:"cabin_class" enums:"first,business,premium_economy,economy,unknown" example:"economy"`
+	Seat            string  `json:"seat" example:"29C"`
+	PassengerStatus string  `json:"passenger_status" example:"1"`
+	Origin          Airport `json:"origin"`
+	Destination     Airport `json:"destination"`
 }
 
 type Airport struct {
-	Code        string `json:"code"`
-	AirportName string `json:"airport_name"`
-	CityName    string `json:"city_name"`
-	Country     string `json:"country"`
+	Code        string `json:"code" pattern:"^[A-Z]{3}$" example:"PRG"`
+	AirportName string `json:"airport_name" example:"Václav Havel Airport Prague"`
+	CityName    string `json:"city_name" example:"Prague"`
+	Country     string `json:"country" example:"Czechia"`
 }
 
 // Parse preserves fixed-width whitespace and skips each leg's conditional fields

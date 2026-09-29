@@ -1,0 +1,613 @@
+{
+    "components": {
+        "schemas": {
+            "api.APIError": {
+                "properties": {
+                    "code": {
+                        "example": "barcode_not_found",
+                        "type": "string"
+                    },
+                    "message": {
+                        "example": "No readable PDF417 barcode found",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "code",
+                    "message"
+                ],
+                "type": "object"
+            },
+            "api.ErrorResponse": {
+                "properties": {
+                    "error": {
+                        "$ref": "#/components/schemas/api.APIError"
+                    }
+                },
+                "required": [
+                    "error"
+                ],
+                "type": "object"
+            },
+            "api.HealthResponse": {
+                "properties": {
+                    "status": {
+                        "enum": [
+                            "ok"
+                        ],
+                        "example": "ok",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "status"
+                ],
+                "type": "object"
+            },
+            "api.ParsedPass": {
+                "properties": {
+                    "decoded_bcbp": {
+                        "$ref": "#/components/schemas/bcbp.BoardingPass"
+                    }
+                },
+                "required": [
+                    "decoded_bcbp"
+                ],
+                "type": "object"
+            },
+            "bcbp.Airport": {
+                "properties": {
+                    "airport_name": {
+                        "example": "Václav Havel Airport Prague",
+                        "type": "string"
+                    },
+                    "city_name": {
+                        "example": "Prague",
+                        "type": "string"
+                    },
+                    "code": {
+                        "example": "PRG",
+                        "pattern": "^[A-Z]{3}$",
+                        "type": "string"
+                    },
+                    "country": {
+                        "example": "Czechia",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "airport_name",
+                    "city_name",
+                    "code",
+                    "country"
+                ],
+                "type": "object"
+            },
+            "bcbp.BoardingPass": {
+                "properties": {
+                    "legs": {
+                        "items": {
+                            "$ref": "#/components/schemas/bcbp.Leg"
+                        },
+                        "maxItems": 4,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "passenger_name": {
+                        "example": "CYPRIAN/MICHAL",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "legs",
+                    "passenger_name"
+                ],
+                "type": "object"
+            },
+            "bcbp.Leg": {
+                "properties": {
+                    "airline_code": {
+                        "example": "FR",
+                        "type": "string"
+                    },
+                    "booking_reference": {
+                        "example": "ZKN85B",
+                        "type": "string"
+                    },
+                    "cabin_class": {
+                        "enum": [
+                            "first",
+                            "business",
+                            "premium_economy",
+                            "economy",
+                            "unknown"
+                        ],
+                        "example": "economy",
+                        "type": "string"
+                    },
+                    "destination": {
+                        "$ref": "#/components/schemas/bcbp.Airport"
+                    },
+                    "flight_number": {
+                        "example": "7774",
+                        "type": "string"
+                    },
+                    "julian_date": {
+                        "description": "Day of year; BCBP mandatory fields do not carry the flight year.",
+                        "example": 105,
+                        "maximum": 366,
+                        "minimum": 1,
+                        "type": "integer"
+                    },
+                    "origin": {
+                        "$ref": "#/components/schemas/bcbp.Airport"
+                    },
+                    "passenger_status": {
+                        "example": "1",
+                        "type": "string"
+                    },
+                    "seat": {
+                        "example": "29C",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "airline_code",
+                    "booking_reference",
+                    "cabin_class",
+                    "destination",
+                    "flight_number",
+                    "julian_date",
+                    "origin",
+                    "passenger_status",
+                    "seat"
+                ],
+                "type": "object"
+            },
+            "store.Page": {
+                "properties": {
+                    "items": {
+                        "items": {
+                            "$ref": "#/components/schemas/store.Record"
+                        },
+                        "type": "array",
+                        "uniqueItems": false
+                    },
+                    "limit": {
+                        "example": 20,
+                        "maximum": 100,
+                        "minimum": 1,
+                        "type": "integer"
+                    },
+                    "offset": {
+                        "example": 0,
+                        "maximum": 2147483647,
+                        "minimum": 0,
+                        "type": "integer"
+                    },
+                    "total": {
+                        "minimum": 0,
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "items",
+                    "limit",
+                    "offset",
+                    "total"
+                ],
+                "type": "object"
+            },
+            "store.Record": {
+                "properties": {
+                    "decoded_bcbp": {
+                        "$ref": "#/components/schemas/bcbp.BoardingPass"
+                    },
+                    "id": {
+                        "format": "uuid",
+                        "type": "string"
+                    },
+                    "parsed_at": {
+                        "format": "date-time",
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "decoded_bcbp",
+                    "id",
+                    "parsed_at"
+                ],
+                "type": "object"
+            }
+        }
+    },
+    "info": {
+        "description": "Parse a PDF417 boarding pass from PDF and retain successfully parsed results.",
+        "title": "Boarding Pass API",
+        "version": "1.0.0"
+    },
+    "externalDocs": {
+        "description": "Original assignment",
+        "url": "https://github.com/mcyprian/interview_task/blob/main/Boarding_Pass_Parsing_Task.md"
+    },
+    "paths": {
+        "/boarding-pass/parse-from-file": {
+            "post": {
+                "description": "Accepts a PDF of up to 10 pages. The complete multipart request must fit within 10 MiB. Repeated identical barcodes are accepted; distinct barcodes in the same document are rejected.\nEach successful call creates a new history entry, including repeated uploads. Processing has a 30-second context deadline. Airport lookup failures do not save partial records.",
+                "operationId": "parseBoardingPass",
+                "requestBody": {
+                    "content": {
+                        "multipart/form-data": {
+                            "schema": {
+                                "properties": {
+                                    "file": {
+                                        "description": "Exactly one PDF file; complete request limited to 10 MiB",
+                                        "format": "binary",
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "file"
+                                ],
+                                "type": "object"
+                            }
+                        }
+                    },
+                    "description": "Exactly one PDF file; complete request limited to 10 MiB",
+                    "required": true
+                },
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ParsedPass"
+                                }
+                            }
+                        },
+                        "description": "Decoded and committed to history"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Malformed multipart, missing or duplicate file, or empty upload"
+                    },
+                    "405": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Method not allowed"
+                    },
+                    "408": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Request canceled"
+                    },
+                    "413": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Multipart request exceeds 10 MiB"
+                    },
+                    "415": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Expected multipart/form-data containing a PDF"
+                    },
+                    "422": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Invalid PDF, too many pages, missing or ambiguous PDF417 barcode, or invalid BCBP"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal processing or persistence failure"
+                    },
+                    "502": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Airport information is unavailable"
+                    },
+                    "503": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Both processing slots are busy; retry after one second",
+                        "headers": {
+                            "Retry-After": {
+                                "description": "Seconds to wait before retrying (1)",
+                                "schema": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "504": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Processing timed out"
+                    }
+                },
+                "summary": "Decode and save one boarding pass",
+                "tags": [
+                    "Boarding passes"
+                ]
+            }
+        },
+        "/boarding-passes": {
+            "get": {
+                "description": "Filters are combined with AND. Total counts all matching records before pagination. Equal timestamps are ordered by insertion sequence, newest first.\nUnknown or repeated query parameters, invalid UTF-8, and NUL characters are rejected. String filter limits are measured in UTF-8 bytes.",
+                "operationId": "listBoardingPasses",
+                "parameters": [
+                    {
+                        "description": "Maximum records to return",
+                        "in": "query",
+                        "name": "limit",
+                        "schema": {
+                            "default": 20,
+                            "maximum": 100,
+                            "minimum": 1,
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "Matching records to skip",
+                        "in": "query",
+                        "name": "offset",
+                        "schema": {
+                            "default": 0,
+                            "maximum": 2147483647,
+                            "minimum": 0,
+                            "type": "integer"
+                        }
+                    },
+                    {
+                        "description": "Case-insensitive literal substring of the passenger name; at most 100 UTF-8 bytes",
+                        "in": "query",
+                        "name": "passenger_name",
+                        "schema": {
+                            "maxLength": 100,
+                            "type": "string"
+                        }
+                    },
+                    {
+                        "description": "Exact, case-sensitive match on any flight leg; empty means no filter; at most 3 UTF-8 bytes",
+                        "in": "query",
+                        "name": "airline_code",
+                        "schema": {
+                            "maxLength": 3,
+                            "type": "string"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/store.Page"
+                                }
+                            }
+                        },
+                        "description": "Matching records"
+                    },
+                    "400": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Invalid query parameters"
+                    },
+                    "405": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Method not allowed"
+                    },
+                    "408": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Request canceled"
+                    },
+                    "500": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Internal persistence failure"
+                    },
+                    "504": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.ErrorResponse"
+                                }
+                            }
+                        },
+                        "description": "Query timed out"
+                    }
+                },
+                "summary": "List previously parsed boarding passes, newest first",
+                "tags": [
+                    "Boarding passes"
+                ]
+            }
+        },
+        "/documentation": {
+            "get": {
+                "operationId": "documentation",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "text/html": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "description": "Swagger UI"
+                    }
+                },
+                "summary": "Interactive API documentation",
+                "tags": [
+                    "Documentation"
+                ]
+            }
+        },
+        "/documentation/swagger.json": {
+            "get": {
+                "operationId": "specJSON",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "type": "object"
+                                }
+                            }
+                        },
+                        "description": "OpenAPI JSON"
+                    }
+                },
+                "summary": "Download the generated OpenAPI specification as JSON",
+                "tags": [
+                    "Documentation"
+                ]
+            }
+        },
+        "/documentation/swagger.yaml": {
+            "get": {
+                "operationId": "specYAML",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/yaml": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "description": "OpenAPI YAML"
+                    }
+                },
+                "summary": "Download the generated OpenAPI specification as YAML",
+                "tags": [
+                    "Documentation"
+                ]
+            }
+        },
+        "/healthz": {
+            "get": {
+                "operationId": "health",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/api.HealthResponse"
+                                }
+                            }
+                        },
+                        "description": "Server is running"
+                    }
+                },
+                "summary": "Process liveness (does not check external services)",
+                "tags": [
+                    "System"
+                ]
+            }
+        },
+        "/openapi.yaml": {
+            "get": {
+                "operationId": "openAPI",
+                "responses": {
+                    "200": {
+                        "content": {
+                            "application/yaml": {
+                                "schema": {
+                                    "type": "string"
+                                }
+                            }
+                        },
+                        "description": "OpenAPI YAML"
+                    }
+                },
+                "summary": "Download the generated OpenAPI specification",
+                "tags": [
+                    "Documentation"
+                ]
+            }
+        }
+    },
+    "openapi": "3.1.0",
+    "servers": [
+        {
+            "description": "Current server",
+            "url": "/"
+        }
+    ]
+}

@@ -28,5 +28,4 @@ jobs:
           go-version-file: go.mod
           cache: true
       - run: sudo apt-get update && sudo apt-get install -y poppler-utils
-      - run: go vet -tags=integration ./...
-      - run: go test -race -tags=integration -coverpkg=./... -coverprofile=coverage.out ./...
+      - run: make check
