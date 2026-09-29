@@ -1,0 +1,11 @@
+.idea/
+/bin/
+/data/
+/coverage.out
+*.db
+*.db-shm
+*.db-wal
+
+.env
+.env.*
+!.env.example
