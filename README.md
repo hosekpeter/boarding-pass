@@ -295,7 +295,9 @@ The request flows through small packages:
    [`zxinggo`](https://github.com/ericlevine/zxinggo). Rendering handles both image
    and vector barcodes. Pages are limited to 2400 pixels on their longest side.
 3. `internal/bcbp` parses fixed-width format M fields for 1–4 legs and respects
-   the hexadecimal lengths of optional sections.
+   the hexadecimal lengths of optional sections. Field positions and widths are
+   named in `internal/bcbp/layout.go`; `Parse` delegates header, flight-leg, and
+   trailing security-block handling to separate functions.
 4. `internal/client/skypicker` is a reusable HTTP client with its own `Airport`
    type, a five-second timeout, and a bounded 24-hour cache of successful lookups.
    It has no dependency on the boarding-pass model; `internal/service` maps the

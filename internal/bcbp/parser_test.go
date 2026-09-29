@@ -22,6 +22,32 @@ func TestParseSample(t *testing.T) {
 	assert.Equal(t, want, pass.Legs[0])
 }
 
+func TestFieldPaddingKeepsFollowingFieldsInPlace(t *testing.T) {
+	for _, tc := range []struct {
+		name, passenger, airline, flight, seat string
+	}{
+		{"short values", "NOVAK/JAN", "FR", "7774", "29C"},
+		{"extra letter", "NOVAK/JANA", "RYR", "12A", "1A"},
+		{"full width values", "SMITH-JOHNSON/ALICEA", "RYR", "1234A", "123A"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Encode the documented field widths independently of parser offsets.
+			payload := fmt.Sprintf("M1%-20sE%-7s%s%s%-3s%-5s%03d%s%4s%-5s%s%s",
+				tc.passenger, "REF123", "KSC", "PRG", tc.airline, tc.flight, 105, "Y", tc.seat, "00001", "1", "00")
+			pass, err := Parse(payload)
+			require.NoError(t, err)
+			assert.Equal(t, BoardingPass{
+				PassengerName: tc.passenger,
+				Legs: []Leg{{
+					BookingReference: "REF123", Origin: Airport{Code: "KSC"}, Destination: Airport{Code: "PRG"},
+					AirlineCode: tc.airline, FlightNumber: tc.flight, JulianDate: 105,
+					CabinClass: "economy", Seat: tc.seat, PassengerStatus: "1",
+				}},
+			}, pass)
+		})
+	}
+}
+
 func TestParseMultipleLegsAndSecurity(t *testing.T) {
 	// Conditional data contains what looks like a leg; only the length determines
 	// where the next actual leg starts. Last block contains a trailing space.

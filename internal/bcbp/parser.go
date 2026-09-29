@@ -34,98 +34,119 @@ type Airport struct {
 // Parse preserves fixed-width whitespace and skips each leg's conditional fields
 // using its hexadecimal length. It does not verify optional digital signatures.
 func Parse(payload string) (BoardingPass, error) {
-	var pass BoardingPass
-	if len(payload) < 23 || len(payload) > 4096 {
-		return pass, fmt.Errorf("invalid BCBP length")
+	name, count, err := parseHeader(payload)
+	pass := BoardingPass{PassengerName: name}
+	if err != nil {
+		return pass, err
 	}
 
-	for _, b := range []byte(payload) {
-		if b < 32 || b > 126 {
-			return pass, fmt.Errorf("BCBP must contain printable ASCII")
-		}
-	}
-
-	if payload[0] != 'M' || payload[1] < '1' || payload[1] > '4' {
-		return pass, fmt.Errorf("expected format M with 1 to 4 flight legs")
-	}
-
-	pass.PassengerName = strings.TrimSpace(payload[2:22])
-	if pass.PassengerName == "" {
-		return pass, fmt.Errorf("missing passenger name")
-	}
-
-	if payload[22] != 'E' && payload[22] != ' ' {
-		return pass, fmt.Errorf("invalid electronic ticket indicator")
-	}
-
-	count := int(payload[1] - '0')
 	pass.Legs = make([]Leg, 0, count)
-	pos := 23
-
+	rest := payload[headerSize:]
 	for i := range count {
-		if len(payload)-pos < 37 {
-			return BoardingPass{}, fmt.Errorf("truncated flight leg %d", i+1)
-		}
-		raw := payload[pos : pos+37]
-		for _, digit := range raw[21:24] {
-			if digit < '0' || digit > '9' {
-				return BoardingPass{}, fmt.Errorf("invalid Julian date in leg %d", i+1)
-			}
-		}
-		day, err := strconv.Atoi(raw[21:24])
-		if err != nil || day < 1 || day > 366 {
-			return BoardingPass{}, fmt.Errorf("invalid Julian date in leg %d", i+1)
-		}
-
-		carrier := strings.TrimSpace(raw[13:16])
-		if !letters(raw[7:10]) || !letters(raw[10:13]) || len(carrier) < 2 || !alphaNumeric(carrier) {
-			return BoardingPass{}, fmt.Errorf("invalid airport or airline code in leg %d", i+1)
-		}
-
-		flight := strings.TrimSpace(raw[16:21])
-		if flight == "" || !alphaNumeric(flight) || flight[0] < '0' || flight[0] > '9' {
-			return BoardingPass{}, fmt.Errorf("invalid flight number in leg %d", i+1)
-		}
-
-		size, err := hexLength(raw[35:37])
+		leg, consumed, err := parseLeg(rest)
 		if err != nil {
-			return BoardingPass{}, fmt.Errorf("invalid variable field length in leg %d", i+1)
+			return BoardingPass{}, fmt.Errorf("flight leg %d: %w", i+1, err)
 		}
-
-		pos += 37
-		if size > len(payload)-pos {
-			return BoardingPass{}, fmt.Errorf("truncated variable fields in leg %d", i+1)
-		}
-
-		pos += size
-		pass.Legs = append(pass.Legs, Leg{
-			BookingReference: strings.TrimSpace(raw[:7]),
-			Origin:           Airport{Code: raw[7:10]},
-			Destination:      Airport{Code: raw[10:13]},
-			AirlineCode:      carrier,
-			FlightNumber:     unpad(flight),
-			JulianDate:       day,
-			CabinClass:       cabin(raw[24]),
-			Seat:             unpad(strings.TrimSpace(raw[25:29])),
-			PassengerStatus:  strings.TrimSpace(raw[34:35]),
-		})
+		pass.Legs = append(pass.Legs, leg)
+		rest = rest[consumed:]
 	}
-	// A security block, when present, follows all flight legs, not each leg.
-	rest := payload[pos:]
-	if strings.HasPrefix(rest, "^") {
-		if len(rest) < 4 {
-			return BoardingPass{}, fmt.Errorf("truncated security header")
-		}
-		size, err := hexLength(rest[2:4])
-		if err != nil || size > len(rest)-4 {
-			return BoardingPass{}, fmt.Errorf("invalid security length")
-		}
-		rest = rest[4+size:]
-	}
-	if strings.TrimSpace(rest) != "" {
-		return BoardingPass{}, fmt.Errorf("unexpected trailing BCBP data")
+
+	if err := validateTrailer(rest); err != nil {
+		return BoardingPass{}, err
 	}
 	return pass, nil
+}
+
+func parseHeader(payload string) (string, int, error) {
+	if len(payload) < headerSize || len(payload) > maxPayloadSize {
+		return "", 0, fmt.Errorf("invalid BCBP length")
+	}
+	// ASCII validation makes byte offsets equivalent to character positions.
+	for _, b := range []byte(payload) {
+		if b < 32 || b > 126 {
+			return "", 0, fmt.Errorf("BCBP must contain printable ASCII")
+		}
+	}
+	if payload[formatIndex] != 'M' || payload[legCountIndex] < '1' || payload[legCountIndex] > '4' {
+		return "", 0, fmt.Errorf("expected format M with 1 to 4 flight legs")
+	}
+
+	name := strings.TrimSpace(payload[passengerNameStart:passengerNameEnd])
+	if name == "" {
+		return "", 0, fmt.Errorf("missing passenger name")
+	}
+	if payload[ticketIndicatorIndex] != 'E' && payload[ticketIndicatorIndex] != ' ' {
+		return name, 0, fmt.Errorf("invalid electronic ticket indicator")
+	}
+	return name, int(payload[legCountIndex] - '0'), nil
+}
+
+// parseLeg returns the decoded leg and the number of bytes consumed, including
+// the conditional fields that follow its fixed-width block.
+func parseLeg(data string) (Leg, int, error) {
+	if len(data) < legSize {
+		return Leg{}, 0, fmt.Errorf("truncated mandatory fields")
+	}
+	raw := data[:legSize]
+	dayText := raw[julianDateStart:julianDateEnd]
+	for _, digit := range dayText {
+		if digit < '0' || digit > '9' {
+			return Leg{}, 0, fmt.Errorf("invalid Julian date")
+		}
+	}
+	day, err := strconv.Atoi(dayText)
+	if err != nil || day < 1 || day > 366 {
+		return Leg{}, 0, fmt.Errorf("invalid Julian date")
+	}
+
+	origin := raw[originStart:originEnd]
+	destination := raw[destinationStart:destinationEnd]
+	carrier := strings.TrimSpace(raw[airlineStart:airlineEnd])
+	if !letters(origin) || !letters(destination) || len(carrier) < 2 || !alphaNumeric(carrier) {
+		return Leg{}, 0, fmt.Errorf("invalid airport or airline code")
+	}
+	flight := strings.TrimSpace(raw[flightNumberStart:flightNumberEnd])
+	if flight == "" || !alphaNumeric(flight) || flight[0] < '0' || flight[0] > '9' {
+		return Leg{}, 0, fmt.Errorf("invalid flight number")
+	}
+
+	conditionalSize, err := hexLength(raw[conditionalLengthStart:conditionalLengthEnd])
+	if err != nil {
+		return Leg{}, 0, fmt.Errorf("invalid variable field length")
+	}
+	consumed := legSize + conditionalSize
+	if consumed > len(data) {
+		return Leg{}, 0, fmt.Errorf("truncated variable fields")
+	}
+	return Leg{
+		BookingReference: strings.TrimSpace(raw[bookingReferenceStart:bookingReferenceEnd]),
+		Origin:           Airport{Code: origin},
+		Destination:      Airport{Code: destination},
+		AirlineCode:      carrier,
+		FlightNumber:     unpad(flight),
+		JulianDate:       day,
+		CabinClass:       cabin(raw[cabinClassIndex]),
+		Seat:             unpad(strings.TrimSpace(raw[seatStart:seatEnd])),
+		PassengerStatus:  strings.TrimSpace(raw[passengerStatusStart:passengerStatusEnd]),
+	}, consumed, nil
+}
+
+// A security block, when present, follows all flight legs, not each leg.
+func validateTrailer(rest string) error {
+	if strings.HasPrefix(rest, "^") {
+		if len(rest) < securityHeaderSize {
+			return fmt.Errorf("truncated security header")
+		}
+		size, err := hexLength(rest[securityLengthStart:securityLengthEnd])
+		if err != nil || size > len(rest)-securityHeaderSize {
+			return fmt.Errorf("invalid security length")
+		}
+		rest = rest[securityHeaderSize+size:]
+	}
+	if strings.TrimSpace(rest) != "" {
+		return fmt.Errorf("unexpected trailing BCBP data")
+	}
+	return nil
 }
 
 func hexLength(s string) (int, error) {
