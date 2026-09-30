@@ -35,6 +35,8 @@ type Airport struct {
 // Parse preserves fixed-width whitespace and skips each leg's conditional fields
 // using its hexadecimal length. It does not verify optional digital signatures.
 func Parse(payload string) (BoardingPass, error) {
+	// Accept scanner line endings without trimming fixed-width space padding.
+	payload = strings.TrimRight(payload, "\r\n")
 	name, count, err := parseHeader(payload)
 	pass := BoardingPass{PassengerName: name}
 	if err != nil {
@@ -110,6 +112,10 @@ func parseLeg(data string) (Leg, int, error) {
 	if flight == "" || !alphaNumeric(flight) || flight[0] < '0' || flight[0] > '9' {
 		return Leg{}, 0, fmt.Errorf("invalid flight number")
 	}
+	seat := strings.TrimSpace(raw[seatStart:seatEnd])
+	if seat != "" && !alphaNumeric(seat) {
+		return Leg{}, 0, fmt.Errorf("invalid seat")
+	}
 
 	conditionalSize, err := hexLength(raw[conditionalLengthStart:conditionalLengthEnd])
 	if err != nil {
@@ -127,7 +133,7 @@ func parseLeg(data string) (Leg, int, error) {
 		FlightNumber:     unpad(flight),
 		JulianDate:       day,
 		CabinClass:       cabin(raw[cabinClassIndex]),
-		Seat:             unpad(strings.TrimSpace(raw[seatStart:seatEnd])),
+		Seat:             unpad(seat),
 		PassengerStatus:  strings.TrimSpace(raw[passengerStatusStart:passengerStatusEnd]),
 	}, consumed, nil
 }

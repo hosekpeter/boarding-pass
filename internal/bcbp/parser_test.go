@@ -22,6 +22,26 @@ func TestParseSample(t *testing.T) {
 	assert.Equal(t, want, pass.Legs[0])
 }
 
+func TestScannerLineEndings(t *testing.T) {
+	want, err := Parse(sample)
+	require.NoError(t, err)
+	for _, ending := range []string{"\n", "\r\n"} {
+		got, err := Parse(sample + ending)
+		require.NoError(t, err)
+		assert.Equal(t, want, got)
+	}
+}
+
+func TestSeatCharacters(t *testing.T) {
+	for _, seat := range []string{"!!!!", "02 C", "01a!"} {
+		_, err := Parse(sample[:48] + seat + sample[52:])
+		require.Error(t, err, seat)
+	}
+	pass, err := Parse(sample[:48] + "    " + sample[52:])
+	require.NoError(t, err)
+	assert.Empty(t, pass.Legs[0].Seat)
+}
+
 func TestFieldPaddingKeepsFollowingFieldsInPlace(t *testing.T) {
 	for _, tc := range []struct {
 		name, passenger, airline, flight, seat string
