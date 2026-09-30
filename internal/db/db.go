@@ -42,14 +42,16 @@ func Connect(ctx context.Context, cfg config.DBConfig) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create connection pool: %w", err)
 	}
+	var lastErr error
 	for {
-		if err := pool.Ping(ctx); err == nil {
+		lastErr = pool.Ping(ctx)
+		if lastErr == nil {
 			return pool, nil
 		}
 		select {
 		case <-ctx.Done():
 			pool.Close()
-			return nil, fmt.Errorf("connect to database: %w", ctx.Err())
+			return nil, fmt.Errorf("connect to database: %w; last attempt: %w", ctx.Err(), lastErr)
 		case <-time.After(retryInterval):
 		}
 	}
@@ -60,7 +62,12 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	if pool == nil {
 		return errors.New("database pool is nil")
 	}
-	sqlDB := stdlib.OpenDBFromPool(pool)
+	// Migrations have the startup context deadline, not the shorter query timeout.
+	// Use a dedicated connection so changed session settings cannot leak into the pool.
+	migrationConfig := pool.Config().ConnConfig.Copy()
+	migrationConfig.RuntimeParams["statement_timeout"] = "0"
+	sqlDB := stdlib.OpenDB(*migrationConfig)
+	sqlDB.SetMaxOpenConns(1)
 	defer sqlDB.Close()
 	migrations, err := fs.Sub(migrationFS, "migrations")
 	if err != nil {

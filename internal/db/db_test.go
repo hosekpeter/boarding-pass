@@ -50,3 +50,22 @@ func TestConnectTimeoutBoundsUnresponsiveServer(t *testing.T) {
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
 	assert.LessOrEqual(t, time.Since(started), time.Second, "database startup exceeded its connection timeout")
 }
+
+func TestConnectRetainsLastFailureWithoutPassword(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	host, port, err := net.SplitHostPort(listener.Addr().String())
+	require.NoError(t, err)
+	n, err := strconv.Atoi(port)
+	require.NoError(t, err)
+	require.NoError(t, listener.Close())
+	pool, err := Connect(t.Context(), config.DBConfig{
+		Host: host, Port: n, User: "user", Password: "do-not-log-this-password", Name: "passes",
+		SSLMode: "disable", MaxConns: 1, ConnectTimeout: 50 * time.Millisecond, StatementTimeout: time.Second,
+	})
+	assert.Nil(t, pool)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	var networkErr *net.OpError
+	assert.ErrorAs(t, err, &networkErr, "retain the connection failure as well as the retry deadline")
+	assert.NotContains(t, err.Error(), "do-not-log-this-password")
+}
