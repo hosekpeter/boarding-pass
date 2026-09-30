@@ -12,9 +12,13 @@ import (
 )
 
 func TestDocumentation(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestAPI(&parserStub{}, &repoStub{}, logger())
 	for _, path := range []string{"/documentation", "/documentation/"} {
 		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
 			require.Equal(t, http.StatusOK, resp.Code)
@@ -30,6 +34,8 @@ func TestDocumentation(t *testing.T) {
 		{"/documentation/swagger-ui.css", "text/css"},
 	} {
 		t.Run(asset.path, func(t *testing.T) {
+			t.Parallel()
+
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, asset.path, nil))
 			require.Equal(t, http.StatusOK, resp.Code)
@@ -47,6 +53,8 @@ func TestDocumentation(t *testing.T) {
 }
 
 func TestOpenAPIContract(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestAPI(&parserStub{}, &repoStub{}, logger())
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/documentation/swagger.yaml", nil))

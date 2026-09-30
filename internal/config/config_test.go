@@ -21,6 +21,7 @@ func validConfig() Config {
 
 func defaultEnvironment(t *testing.T) {
 	t.Helper()
+	// Environment variables are process-wide, so callers must stay sequential.
 	for _, key := range []string{"HTTP_ADDR", "LOCATIONS_BASE_URL", "DB_HOST", "DB_PORT", "DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SSLMODE", "DB_SCHEMA", "DB_MAX_CONNS", "DB_MIN_CONNS", "DB_STATEMENT_TIMEOUT", "DB_CONNECT_TIMEOUT"} {
 		t.Setenv(key, "")
 	}
@@ -99,8 +100,12 @@ func TestInvalidEnvironment(t *testing.T) {
 }
 
 func TestValidListenAddresses(t *testing.T) {
+	t.Parallel()
+
 	for _, address := range []string{"127.0.0.1:8080", ":8080", "localhost:8080", "[::1]:8080", "[fe80::1%eth0]:8080", "127.0.0.1:0"} {
 		t.Run(address, func(t *testing.T) {
+			t.Parallel()
+
 			cfg := validConfig()
 			cfg.HTTPAddr = address
 			require.NoError(t, cfg.Validate())
@@ -109,6 +114,8 @@ func TestValidListenAddresses(t *testing.T) {
 }
 
 func TestValidationCollectsMissingFields(t *testing.T) {
+	t.Parallel()
+
 	err := (Config{}).Validate()
 	require.Error(t, err)
 	for _, key := range []string{"DB_HOST", "DB_PORT", "DB_USER", "DB_NAME", "DB_SSLMODE", "LOCATIONS_BASE_URL", "HTTP_ADDR"} {

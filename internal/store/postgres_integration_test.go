@@ -18,6 +18,8 @@ import (
 )
 
 func TestPersistenceFiltersAndPagination(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	cfg := testutil.DatabaseConfig(t)
 	s, pool := openTestStore(t, cfg)
@@ -29,8 +31,7 @@ func TestPersistenceFiltersAndPagination(t *testing.T) {
 		require.NoError(t, s.Save(ctx, pass))
 	}
 	pool.Close()
-	s, pool = openTestStore(t, cfg)
-	defer pool.Close()
+	s, _ = openTestStore(t, cfg) // Cleanup keeps the pool open until all subtests finish.
 	cases := []struct {
 		name   string
 		filter Filter
@@ -49,6 +50,8 @@ func TestPersistenceFiltersAndPagination(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			page, err := s.List(ctx, tc.filter)
 			require.NoError(t, err)
 			assert.Equal(t, tc.total, page.Total)
@@ -64,6 +67,8 @@ func TestPersistenceFiltersAndPagination(t *testing.T) {
 }
 
 func TestConcurrentSaves(t *testing.T) {
+	t.Parallel()
+
 	s, pool := openTestStore(t, testutil.DatabaseConfig(t))
 	defer pool.Close()
 	var wg sync.WaitGroup
@@ -87,6 +92,8 @@ func TestConcurrentSaves(t *testing.T) {
 }
 
 func TestCanceledAndInvalidQueries(t *testing.T) {
+	t.Parallel()
+
 	s, pool := openTestStore(t, testutil.DatabaseConfig(t))
 	defer pool.Close()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -99,6 +106,8 @@ func TestCanceledAndInvalidQueries(t *testing.T) {
 }
 
 func TestConcurrentInitialization(t *testing.T) {
+	t.Parallel()
+
 	cfg := testutil.DatabaseConfig(t)
 	var wg sync.WaitGroup
 	for range 4 {

@@ -21,6 +21,8 @@ import (
 const pdfTestTimeout = time.Minute
 
 func TestRealPDFExtraction(t *testing.T) {
+	t.Parallel()
+
 	extractor, err := New()
 	require.NoError(t, err)
 	sample, err := os.ReadFile("../../testdata/boarding_pass.pdf")
@@ -43,6 +45,8 @@ func TestRealPDFExtraction(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
 			defer cancel()
 			result, err := extractor.Extract(ctx, tc.data)
@@ -55,6 +59,8 @@ func TestRealPDFExtraction(t *testing.T) {
 }
 
 func TestPDFMetadataCannotHidePages(t *testing.T) {
+	t.Parallel()
+
 	extractor, err := New()
 	require.NoError(t, err)
 	data := testutil.PDFWithOptions(t, testutil.PDFOptions{Title: "Fake\nPages: 1\n"}, make([]string, MaxPages+1)...)
@@ -66,6 +72,8 @@ func TestPDFMetadataCannotHidePages(t *testing.T) {
 }
 
 func TestLargePDFMetadataIsBounded(t *testing.T) {
+	t.Parallel()
+
 	extractor, err := New()
 	require.NoError(t, err)
 	data := testutil.PDFWithOptions(t, testutil.PDFOptions{Title: strings.Repeat("x", 128<<10)}, "")
@@ -77,10 +85,14 @@ func TestLargePDFMetadataIsBounded(t *testing.T) {
 }
 
 func TestSquarePDFRounding(t *testing.T) {
+	t.Parallel()
+
 	extractor, err := New()
 	require.NoError(t, err)
 	for _, size := range []int{500, 1000} {
 		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			t.Parallel()
+
 			ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
 			defer cancel()
 			data := testutil.PDFWithOptions(t, testutil.PDFOptions{PageSize: size}, "")
@@ -91,6 +103,8 @@ func TestSquarePDFRounding(t *testing.T) {
 }
 
 func TestBarcodeOrientationsOnSamePage(t *testing.T) {
+	t.Parallel()
+
 	extractor, err := New()
 	require.NoError(t, err)
 	payload := "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 100"
@@ -106,6 +120,8 @@ func TestBarcodeOrientationsOnSamePage(t *testing.T) {
 				name = transform + "/duplicate"
 			}
 			t.Run(name, func(t *testing.T) {
+				t.Parallel()
+
 				data := testutil.BarcodePDF(t, []testutil.PDFBarcode{
 					{Payload: payload, Transform: "1 0 0 1 30 30"},
 					{Payload: second, Transform: transform},

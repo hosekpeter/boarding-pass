@@ -17,6 +17,8 @@ import (
 )
 
 func TestPageCount(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		info  string
 		count int
@@ -34,6 +36,8 @@ func TestPageCount(t *testing.T) {
 }
 
 func TestBoundedCommandOutput(t *testing.T) {
+	t.Parallel()
+
 	b := &boundedBuffer{remaining: 4}
 	n, err := b.Write([]byte("1234567"))
 	require.NoError(t, err)
@@ -43,6 +47,7 @@ func TestBoundedCommandOutput(t *testing.T) {
 	assert.True(t, b.truncated)
 }
 
+// Subprocess tests change the process environment and must stay sequential.
 func TestActualCommandOutputIsBounded(t *testing.T) {
 	executable, err := os.Executable()
 	require.NoError(t, err)
@@ -93,6 +98,8 @@ func TestPDFCommandHelper(t *testing.T) {
 }
 
 func TestEarlyRejection(t *testing.T) {
+	t.Parallel()
+
 	extractor := &Extractor{}
 	_, err := extractor.Extract(context.Background(), []byte("hello"))
 	require.ErrorIs(t, err, ErrInvalid)
@@ -103,6 +110,8 @@ func TestEarlyRejection(t *testing.T) {
 }
 
 func TestImageWithoutBarcode(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "blank.png")
 	f, err := os.Create(path)
 	require.NoError(t, err)

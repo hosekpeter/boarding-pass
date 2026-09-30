@@ -239,6 +239,11 @@ Errors use a consistent JSON envelope:
 All tests use `testify/assert` for result checks and `testify/require` for
 prerequisites that must pass before the test can continue.
 
+Independent tests and subtests use `t.Parallel()`. Tests that change environment
+variables stay sequential because they affect the whole process. Make and CI
+limit concurrency to two tests per package to keep PDF memory and CPU usage
+bounded; override it with `make test TEST_PARALLEL=4` when needed.
+
 These commands run Go on your computer. For Docker-only checks, use the
 [command above](#run-all-checks-docker-only). `make check` and
 `make test-integration` **do not start PostgreSQL automatically**.
@@ -260,7 +265,7 @@ To use a separate database, supply it explicitly:
 TEST_DATABASE_URL='postgres://user:password@localhost:5432/boarding_pass_test?sslmode=disable' make check
 ```
 
-Direct `go test -tags=integration ./...` also requires `TEST_DATABASE_URL`.
+Direct `go test -parallel=2 -tags=integration ./...` also requires `TEST_DATABASE_URL`.
 Integration tests fail if the database is missing or unavailable. Each database
 test creates a unique schema, selects it through `search_path`, and removes only
 that schema at cleanup; existing application tables are untouched. The test user

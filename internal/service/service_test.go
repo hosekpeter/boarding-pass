@@ -53,6 +53,8 @@ const validPayload = "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 1
 func testLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
 
 func TestParseEnrichesBeforeSave(t *testing.T) {
+	t.Parallel()
+
 	airports := &lookupStub{}
 	repo := &repositoryStub{}
 	parser := service.New(testLogger(), extractorStub{value: validPayload}, airports, repo)
@@ -68,6 +70,8 @@ func TestParseEnrichesBeforeSave(t *testing.T) {
 }
 
 func TestFailuresAreNotSaved(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name      string
 		extract   extractorStub
@@ -80,6 +84,8 @@ func TestFailuresAreNotSaved(t *testing.T) {
 		{"unknown airport", extractorStub{value: validPayload}, skypicker.ErrNotFound, skypicker.ErrNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			repo := &repositoryStub{}
 			_, err := service.New(testLogger(), tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(context.Background(), nil)
 			require.Error(t, err)
@@ -92,12 +98,16 @@ func TestFailuresAreNotSaved(t *testing.T) {
 }
 
 func TestSaveFailureIsReturned(t *testing.T) {
+	t.Parallel()
+
 	failure := errors.New("disk full")
 	_, err := service.New(testLogger(), extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(context.Background(), nil)
 	require.ErrorIs(t, err, failure)
 }
 
 func TestRepeatedAirportsResolvedOnce(t *testing.T) {
+	t.Parallel()
+
 	payload := "M2" + validPayload[2:] + validPayload[23:]
 	airports := &lookupStub{}
 	pass, err := service.New(testLogger(), extractorStub{value: payload}, airports, &repositoryStub{}).Parse(context.Background(), nil)

@@ -29,6 +29,8 @@ import (
 // Exercises the actual PDF renderer, PDF417 decoder, BCBP parser, HTTP airport
 // client and PostgreSQL through the API. Only the external API is stubbed.
 func TestSamplePDFEndToEnd(t *testing.T) {
+	t.Parallel()
+
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		airports := map[string]string{
 			"KSC": `{"code":"KSC","type":"airport","name":"Košice International","city":{"name":"Košice","country":{"name":"Slovakia"}}}`,
@@ -99,8 +101,12 @@ func TestSamplePDFEndToEnd(t *testing.T) {
 }
 
 func TestMultipleLegsEndToEnd(t *testing.T) {
+	t.Parallel()
+
 	for count := 2; count <= 4; count++ {
 		t.Run(fmt.Sprintf("%d legs", count), func(t *testing.T) {
+			t.Parallel()
+
 			codes := []string{"KSC", "PRG", "LHR", "JFK", "LAX"}
 			carriers := []string{"FR", "BA", "AA", "UA"}
 			var payload strings.Builder

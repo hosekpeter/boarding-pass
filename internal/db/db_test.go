@@ -15,6 +15,8 @@ import (
 )
 
 func TestCanceledStartup(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	pool, err := Connect(ctx, config.DBConfig{})
@@ -23,6 +25,8 @@ func TestCanceledStartup(t *testing.T) {
 }
 
 func TestInvalidConfigDoesNotExposeCredentials(t *testing.T) {
+	t.Parallel()
+
 	pool, err := Connect(t.Context(), config.DBConfig{Host: "localhost", Port: 5432, User: "user", Password: "secret", Name: "passes", SSLMode: "invalid", ConnectTimeout: time.Second})
 	assert.Nil(t, pool)
 	require.Error(t, err)
@@ -30,6 +34,8 @@ func TestInvalidConfigDoesNotExposeCredentials(t *testing.T) {
 }
 
 func TestConnectTimeoutBoundsUnresponsiveServer(t *testing.T) {
+	t.Parallel()
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = listener.Close() })
@@ -52,6 +58,8 @@ func TestConnectTimeoutBoundsUnresponsiveServer(t *testing.T) {
 }
 
 func TestConnectRetainsLastFailureWithoutPassword(t *testing.T) {
+	t.Parallel()
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	host, port, err := net.SplitHostPort(listener.Addr().String())

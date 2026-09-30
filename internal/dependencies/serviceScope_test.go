@@ -12,6 +12,8 @@ import (
 )
 
 func TestCanceledStartupDoesNotConnect(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	cfg := config.Config{
@@ -24,6 +26,7 @@ func TestCanceledStartupDoesNotConnect(t *testing.T) {
 	assert.ErrorIs(t, err, context.Canceled)
 }
 
+// PATH changes affect the whole process, so these tests must stay sequential.
 func TestMissingPDFToolsFailsBeforeDatabaseConnection(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	cfg := config.Config{

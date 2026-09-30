@@ -28,6 +28,8 @@ func (fakeScope) Repository() store.Repository { return nil }
 func (fakeScope) Close() error                 { return nil }
 
 func TestStartReportsBindFailure(t *testing.T) {
+	t.Parallel()
+
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer listener.Close()
@@ -36,6 +38,8 @@ func TestStartReportsBindFailure(t *testing.T) {
 }
 
 func TestStartWithCanceledContextDoesNotBind(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	server := New(fakeScope{}, config.Config{HTTPAddr: "invalid address"})
@@ -43,6 +47,8 @@ func TestStartWithCanceledContextDoesNotBind(t *testing.T) {
 }
 
 func TestShutdownWaitsForActiveRequest(t *testing.T) {
+	t.Parallel()
+
 	server := New(fakeScope{}, config.Config{HTTPAddr: "127.0.0.1:0"})
 	address := make(chan string, 1)
 	server.server.BaseContext = func(listener net.Listener) context.Context {

@@ -13,6 +13,8 @@ import (
 const sample = "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 149>5181W 5104BFR 00000000000002A0000000000000 0                          NY"
 
 func TestParseSample(t *testing.T) {
+	t.Parallel()
+
 	pass, err := Parse(sample)
 	require.NoError(t, err)
 	assert.Equal(t, "CYPRIAN/MICHAL", pass.PassengerName)
@@ -23,6 +25,8 @@ func TestParseSample(t *testing.T) {
 }
 
 func TestScannerLineEndings(t *testing.T) {
+	t.Parallel()
+
 	want, err := Parse(sample)
 	require.NoError(t, err)
 	for _, ending := range []string{"\n", "\r\n"} {
@@ -33,6 +37,8 @@ func TestScannerLineEndings(t *testing.T) {
 }
 
 func TestSeatCharacters(t *testing.T) {
+	t.Parallel()
+
 	for _, seat := range []string{"!!!!", "02 C", "01a!"} {
 		_, err := Parse(sample[:48] + seat + sample[52:])
 		require.Error(t, err, seat)
@@ -43,6 +49,8 @@ func TestSeatCharacters(t *testing.T) {
 }
 
 func TestFieldPaddingKeepsFollowingFieldsInPlace(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name, passenger, airline, flight, seat string
 	}{
@@ -51,6 +59,8 @@ func TestFieldPaddingKeepsFollowingFieldsInPlace(t *testing.T) {
 		{"full width values", "SMITH-JOHNSON/ALICEA", "RYR", "1234A", "123A"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			// Encode the documented field widths independently of parser offsets.
 			payload := fmt.Sprintf("M1%-20sE%-7s%s%s%-3s%-5s%03d%s%4s%-5s%s%s",
 				tc.passenger, "REF123", "KSC", "PRG", tc.airline, tc.flight, 105, "Y", tc.seat, "00001", "1", "00")
@@ -69,6 +79,8 @@ func TestFieldPaddingKeepsFollowingFieldsInPlace(t *testing.T) {
 }
 
 func TestParseMultipleLegsAndSecurity(t *testing.T) {
+	t.Parallel()
+
 	// Conditional data contains what looks like a leg; only the length determines
 	// where the next actual leg starts. Last block contains a trailing space.
 	first := sample[23:58] + "06" + "M2ABC "
@@ -83,6 +95,8 @@ func TestParseMultipleLegsAndSecurity(t *testing.T) {
 }
 
 func TestParseInvalid(t *testing.T) {
+	t.Parallel()
+
 	replace := func(start, end int, value string) string { return sample[:start] + value + sample[end:] }
 	cases := map[string]string{
 		"empty": "", "short": "M1", "format": replace(0, 1, "X"), "zero legs": replace(1, 2, "0"), "too many legs": replace(1, 2, "5"),
@@ -94,6 +108,8 @@ func TestParseInvalid(t *testing.T) {
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
 			_, err := Parse(value)
 			assert.Error(t, err)
 		})
@@ -101,6 +117,8 @@ func TestParseInvalid(t *testing.T) {
 }
 
 func TestAllTruncations(t *testing.T) {
+	t.Parallel()
+
 	for n := 0; n < len(sample); n++ {
 		_, err := Parse(sample[:n])
 		assert.Error(t, err, "accepted truncation at %d", n)
@@ -108,6 +126,8 @@ func TestAllTruncations(t *testing.T) {
 }
 
 func TestUnknownCabinAndUnassignedSeat(t *testing.T) {
+	t.Parallel()
+
 	payload := sample[:47] + "Z    " + sample[52:]
 	pass, err := Parse(payload)
 	require.NoError(t, err)
@@ -131,6 +151,8 @@ func FuzzParse(f *testing.F) {
 }
 
 func TestJulianDateFormatAndBounds(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		value string
 		valid bool
@@ -140,6 +162,8 @@ func TestJulianDateFormatAndBounds(t *testing.T) {
 		{"000", false}, {"367", false}, {"1A2", false},
 	} {
 		t.Run(tc.value, func(t *testing.T) {
+			t.Parallel()
+
 			_, err := Parse(sample[:44] + tc.value + sample[47:])
 			if tc.valid {
 				assert.NoError(t, err)

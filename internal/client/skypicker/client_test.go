@@ -18,6 +18,8 @@ import (
 const airportJSON = `{"locations":[{"code":"PRG","type":"airport","name":"Václav Havel Airport Prague","city":{"name":"Prague","country":{"name":"Czechia"}}}]}`
 
 func TestLookupAndCache(t *testing.T) {
+	t.Parallel()
+
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
@@ -45,6 +47,8 @@ func TestLookupAndCache(t *testing.T) {
 }
 
 func TestLookupFailuresAreNotCached(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name   string
 		status int
@@ -58,6 +62,8 @@ func TestLookupFailuresAreNotCached(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			var calls int
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				calls++
@@ -77,6 +83,8 @@ func TestLookupFailuresAreNotCached(t *testing.T) {
 }
 
 func TestUnknownAirportIsNotAnOutage(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprint(w, `{"locations":[]}`)
 	}))
@@ -89,6 +97,8 @@ func TestUnknownAirportIsNotAnOutage(t *testing.T) {
 }
 
 func TestLookupCancellation(t *testing.T) {
+	t.Parallel()
+
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
 	defer server.Close()
 	client, err := New(server.URL, server.Client())
@@ -104,6 +114,8 @@ func TestLookupCancellation(t *testing.T) {
 }
 
 func TestInvalidBaseURL(t *testing.T) {
+	t.Parallel()
+
 	for _, url := range []string{"", "://bad", "file:///tmp/data", "https://example.com?secret=yes", "https://example.com?", "https://user:password@example.com", "https://example.com#fragment"} {
 		_, err := New(url, nil)
 		assert.Error(t, err, "accepted URL %q", url)
@@ -111,6 +123,8 @@ func TestInvalidBaseURL(t *testing.T) {
 }
 
 func TestConcurrentReuse(t *testing.T) {
+	t.Parallel()
+
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)

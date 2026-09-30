@@ -9,8 +9,12 @@ import (
 )
 
 func TestConnectionString(t *testing.T) {
+	t.Parallel()
+
 	for _, host := range []string{"127.0.0.1", "db.internal", "::1", "fe80::1%eth0"} {
 		t.Run(host, func(t *testing.T) {
+			t.Parallel()
+
 			cfg := validConfig()
 			cfg.Database.Host = host
 			cfg.Database.User = "user +:@/%"
@@ -32,8 +36,12 @@ func TestConnectionString(t *testing.T) {
 }
 
 func TestDatabaseFieldsCannotContainNUL(t *testing.T) {
+	t.Parallel()
+
 	for _, field := range []string{"DB_USER", "DB_PASSWORD", "DB_NAME", "DB_SCHEMA"} {
 		t.Run(field, func(t *testing.T) {
+			t.Parallel()
+
 			cfg := validConfig()
 			fields := map[string]*string{"DB_USER": &cfg.Database.User, "DB_PASSWORD": &cfg.Database.Password, "DB_NAME": &cfg.Database.Name, "DB_SCHEMA": &cfg.Database.Schema}
 			*fields[field] = "secret\x00value"

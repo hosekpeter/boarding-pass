@@ -75,6 +75,8 @@ func upload(t *testing.T, fields []string, body []byte) *http.Request {
 }
 
 func TestParseUploadValidation(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name   string
 		fields []string
@@ -93,6 +95,8 @@ func TestParseUploadValidation(t *testing.T) {
 		{"oversized", []string{"file"}, bytes.Repeat([]byte("x"), int(api.MaxUploadBytes)+1), 413, "upload_too_large"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			parser := &parserStub{}
 			handler := newTestAPI(parser, &repoStub{}, logger())
 			resp := httptest.NewRecorder()
@@ -108,6 +112,8 @@ func TestParseUploadValidation(t *testing.T) {
 }
 
 func TestErrorMapping(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		err    error
 		status int
@@ -121,6 +127,8 @@ func TestErrorMapping(t *testing.T) {
 		{errors.New("private database failure"), 500, "internal_error"},
 	} {
 		t.Run(tc.code, func(t *testing.T) {
+			t.Parallel()
+
 			handler := newTestAPI(&parserStub{err: tc.err}, &repoStub{}, logger())
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, upload(t, []string{"file"}, []byte("%PDF-1.4")))
@@ -132,6 +140,8 @@ func TestErrorMapping(t *testing.T) {
 }
 
 func TestListFiltersAndErrors(t *testing.T) {
+	t.Parallel()
+
 	for _, query := range []string{"", "?limit=2&offset=3&passenger_name=cyprian&airline_code=FR"} {
 		repo := &repoStub{}
 		handler := newTestAPI(&parserStub{}, repo, logger())
@@ -149,6 +159,8 @@ func TestListFiltersAndErrors(t *testing.T) {
 	}
 	for _, query := range []string{"limit=0", "limit=101", "limit=nope", "limit=", "offset=-1", "offset=2147483648", "limit=1&limit=2", "unknown=yes", "airline_code=TOOLONG", "passenger_name=%ZZ"} {
 		t.Run(query, func(t *testing.T) {
+			t.Parallel()
+
 			handler := newTestAPI(&parserStub{}, &repoStub{}, logger())
 			resp := httptest.NewRecorder()
 			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/boarding-passes?"+query, nil))
@@ -159,6 +171,8 @@ func TestListFiltersAndErrors(t *testing.T) {
 }
 
 func TestRoutesAndContentType(t *testing.T) {
+	t.Parallel()
+
 	handler := newTestAPI(&parserStub{}, &repoStub{}, logger())
 	for _, tc := range []struct {
 		method, path string
@@ -187,6 +201,8 @@ func (s *blockingParser) Parse(context.Context, []byte) (bcbp.BoardingPass, erro
 	return bcbp.BoardingPass{}, nil
 }
 func TestConcurrentParseLimit(t *testing.T) {
+	t.Parallel()
+
 	parser := &blockingParser{started: make(chan struct{}, 2), release: make(chan struct{})}
 	handler := newTestAPI(parser, &repoStub{}, logger())
 	done := make(chan struct{}, 2)
@@ -217,6 +233,8 @@ func (r *readNotifier) Read(p []byte) (int, error) {
 }
 
 func TestSlowUploadsDoNotReserveParserSlots(t *testing.T) {
+	t.Parallel()
+
 	parser := &parserStub{}
 	handler := newTestAPI(parser, &repoStub{}, logger())
 	for range 2 {
@@ -250,8 +268,12 @@ func TestSlowUploadsDoNotReserveParserSlots(t *testing.T) {
 }
 
 func TestRequestLogging(t *testing.T) {
+	t.Parallel()
+
 	for _, status := range []int{200, 400, 422, 500} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+
 			var logs bytes.Buffer
 			parser := &parserStub{}
 			if status == 422 {
@@ -289,6 +311,8 @@ func TestRequestLogging(t *testing.T) {
 }
 
 func TestJSONWireContract(t *testing.T) {
+	t.Parallel()
+
 	pass := bcbp.BoardingPass{PassengerName: "TEST/USER", Legs: []bcbp.Leg{{
 		BookingReference: "ABC123", AirlineCode: "FR", FlightNumber: "7774", JulianDate: 105,
 		CabinClass: "economy", Seat: "29C", PassengerStatus: "1",
@@ -319,6 +343,8 @@ func (panicParser) Parse(context.Context, []byte) (bcbp.BoardingPass, error) {
 }
 
 func TestPanicUsesErrorEnvelopeAndIsLogged(t *testing.T) {
+	t.Parallel()
+
 	var logs bytes.Buffer
 	handler := newTestAPI(panicParser{}, &repoStub{}, slog.New(slog.NewJSONHandler(&logs, nil)))
 	resp := httptest.NewRecorder()
@@ -362,11 +388,15 @@ func newTestAPI(parser dependencies.Parser, repository store.Repository, logger 
 }
 
 func TestInvalidTextFiltersDoNotReachRepository(t *testing.T) {
+	t.Parallel()
+
 	for _, query := range []string{
 		"passenger_name=%00", "passenger_name=CYPRIAN%00MICHAL", "passenger_name=%FF",
 		"airline_code=%00", "airline_code=%FF", "passenger_name=%C0%AF",
 	} {
 		t.Run(query, func(t *testing.T) {
+			t.Parallel()
+
 			repo := &repoStub{}
 			handler := newTestAPI(&parserStub{}, repo, logger())
 			resp := httptest.NewRecorder()
