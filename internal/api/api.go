@@ -20,6 +20,8 @@ import (
 	"boarding-pass/internal/service"
 	"boarding-pass/internal/store"
 
+	"github.com/go-chi/chi/v5"
+
 	swaggerFiles "github.com/swaggo/files/v2"
 )
 
@@ -31,6 +33,7 @@ type API struct {
 	repository store.Repository
 	logger     *slog.Logger
 	slots      chan struct{}
+	uploads    chan struct{}
 }
 
 // New constructs the HTTP API.
@@ -48,44 +51,41 @@ func New(scope dependencies.ServiceScope) http.Handler {
 		repository: scope.Repository(),
 		logger:     scope.Base().Logger(),
 		slots:      make(chan struct{}, 2),
+		uploads:    make(chan struct{}, 4),
 	}
-	mux := http.NewServeMux()
+	mux := chi.NewRouter()
 
-	mux.HandleFunc("/boarding-pass/parse-from-file", method(http.MethodPost, a.parse))
-	mux.HandleFunc("/boarding-passes", method(http.MethodGet, a.list))
-	mux.HandleFunc("/healthz", method(http.MethodGet, health))
-	mux.HandleFunc("/openapi.yaml", method(http.MethodGet, openAPI))
-	mux.HandleFunc("/documentation", method(http.MethodGet, documentation))
-	mux.HandleFunc("/documentation/{$}", method(http.MethodGet, documentation))
-	mux.HandleFunc("/documentation/swagger.json", method(http.MethodGet, specJSON))
-	mux.HandleFunc("/documentation/swagger.yaml", method(http.MethodGet, specYAML))
-	mux.HandleFunc("/documentation/", method(http.MethodGet,
-		http.StripPrefix("/documentation/", http.FileServer(http.FS(swaggerFiles.FS))).ServeHTTP))
-	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+	mux.Use(requestContext(a.logger))
+	mux.Use(recoverPanic(a.logger))
+	mux.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusNotFound, "not_found", "Endpoint not found")
 	})
+	mux.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
+		for _, candidate := range []string{
+			http.MethodGet, http.MethodHead, http.MethodPost, http.MethodPut, http.MethodPatch,
+			http.MethodDelete, http.MethodConnect, http.MethodOptions, http.MethodTrace,
+		} {
+			if mux.Match(chi.NewRouteContext(), candidate, r.URL.Path) {
+				w.Header().Add("Allow", candidate)
+			}
+		}
+		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Method not allowed for this endpoint")
+	})
+
+	mux.Post("/boarding-pass/parse-from-file", a.parse)
+	mux.Get("/boarding-passes", a.list)
+	mux.Get("/healthz", health)
+	mux.Get("/openapi.yaml", openAPI)
+	mux.Get("/documentation", documentation)
+	mux.Get("/documentation/", documentation)
+	mux.Get("/documentation/swagger.json", specJSON)
+	mux.Get("/documentation/swagger.yaml", specYAML)
+	mux.Get("/documentation/*", http.StripPrefix("/documentation/", http.FileServer(http.FS(swaggerFiles.FS))).ServeHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
-		defer func() {
-			if recover() != nil {
-				a.logger.Error("request panic")
-				writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
-			}
-		}()
 		mux.ServeHTTP(w, r)
 	})
-}
-
-func method(want string, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != want {
-			w.Header().Set("Allow", want)
-			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "Use "+want+" for this endpoint")
-			return
-		}
-		next(w, r)
-	}
 }
 
 // @Summary Decode and save one boarding pass
@@ -102,25 +102,26 @@ func method(want string, next http.HandlerFunc) http.HandlerFunc {
 // @Failure 408 {object} ErrorResponse "Request canceled"
 // @Failure 413 {object} ErrorResponse "Multipart request exceeds 10 MiB"
 // @Failure 415 {object} ErrorResponse "Expected multipart/form-data containing a PDF"
-// @Failure 422 {object} ErrorResponse "Invalid PDF, too many pages, missing or ambiguous PDF417 barcode, or invalid BCBP"
+// @Failure 422 {object} ErrorResponse "Invalid PDF, too many pages, missing or ambiguous PDF417 barcode, invalid BCBP, or airport not found"
 // @Failure 500 {object} ErrorResponse "Internal processing or persistence failure"
 // @Failure 502 {object} ErrorResponse "Airport information is unavailable"
-// @Failure 503 {object} ErrorResponse "Both processing slots are busy; retry after one second"
+// @Failure 503 {object} ErrorResponse "Both processing slots or all four upload slots are busy; retry after one second"
 // @Header 503 {integer} Retry-After "Seconds to wait before retrying (1)"
 // @Failure 504 {object} ErrorResponse "Processing timed out"
 // @Router /boarding-pass/parse-from-file [post]
 func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 	select {
-	case a.slots <- struct{}{}:
-		defer func() { <-a.slots }()
+	case a.uploads <- struct{}{}:
+		defer func() { <-a.uploads }()
 	default:
 		w.Header().Set("Retry-After", "1")
-		writeError(w, http.StatusServiceUnavailable, "busy", "Parser is busy; retry shortly")
+		writeError(w, http.StatusServiceUnavailable, "busy", "Upload capacity is full; retry shortly")
 		return
 	}
 
 	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || contentType != "multipart/form-data" {
+		a.logger.Error("invalid content type", "error", err, "content-type", r.Header.Get("Content-Type"))
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Expected multipart/form-data with a PDF file")
 		return
 	}
@@ -134,20 +135,35 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			a.logger.Error("upload too large", "error", err)
 			writeError(w, http.StatusRequestEntityTooLarge, "upload_too_large", "Multipart request exceeds 10 MiB")
 		} else {
+			a.logger.Error("invalid upload", "error", err)
 			writeError(w, http.StatusBadRequest, "invalid_upload", "Invalid multipart request")
 		}
 		return
 	}
 
 	if len(r.MultipartForm.File) != 1 || len(r.MultipartForm.File["file"]) != 1 {
+		a.logger.Error("invalid upload", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_upload", "Provide exactly one PDF in the file field")
+		return
+	}
+
+	// Reserve an expensive processing slot only after the complete upload arrived.
+	// The separate upload limit bounds memory and temporary files for slow clients.
+	select {
+	case a.slots <- struct{}{}:
+		defer func() { <-a.slots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		writeError(w, http.StatusServiceUnavailable, "busy", "Parser is busy; retry shortly")
 		return
 	}
 
 	f, err := r.MultipartForm.File["file"][0].Open()
 	if err != nil {
+		a.logger.Error("failed to open uploaded file", "error", err)
 		a.fail(w, err)
 		return
 	}
@@ -155,16 +171,19 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 
 	data, err := io.ReadAll(f)
 	if err != nil {
+		a.logger.Error("failed to read uploaded file", "error", err)
 		a.fail(w, err)
 		return
 	}
 
 	if len(data) == 0 {
+		a.logger.Error("empty file", "error", err)
 		writeError(w, http.StatusBadRequest, "empty_file", "The uploaded file is empty")
 		return
 	}
 
 	if len(data) < 5 || string(data[:5]) != "%PDF-" {
+		a.logger.Error("invalid file type", "error", err)
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "The uploaded file must be a PDF")
 		return
 	}
@@ -177,6 +196,7 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 		err = ctx.Err()
 	}
 	if err != nil {
+		a.logger.Error("failed to parse boarding pass", "error", err)
 		a.fail(w, err)
 		return
 	}
@@ -202,15 +222,21 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 // @Failure 504 {object} ErrorResponse "Query timed out"
 // @Router /boarding-passes [get]
 func (a *API) list(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	ctxAttr := context.WithValue(ctx, requestIDContextKey, requestIDFromContext(r.Context()))
+
 	query, err := parseFilter(r)
 	if err != nil {
+		a.logger.ErrorContext(ctxAttr, "invalid query parameters", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_query", err.Error())
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	page, err := a.repository.List(ctx, query)
+
+	page, err := a.repository.List(ctxAttr, query)
 	if err != nil {
+		a.logger.ErrorContext(ctxAttr, "failed to list boarding passes", "error", err)
 		a.fail(w, err)
 		return
 	}
@@ -278,6 +304,8 @@ func (a *API) fail(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusUnprocessableEntity, "invalid_bcbp", "Barcode does not contain a valid supported BCBP payload")
 	case errors.Is(err, skypicker.ErrUnavailable):
 		writeError(w, http.StatusBadGateway, "locations_unavailable", "Airport information is temporarily unavailable")
+	case errors.Is(err, skypicker.ErrNotFound):
+		writeError(w, http.StatusUnprocessableEntity, "airport_not_found", "Airport code was not found in the Locations API")
 	default:
 		a.logger.Error("request failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")

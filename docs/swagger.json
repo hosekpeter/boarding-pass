@@ -187,6 +187,7 @@
                         "type": "integer"
                     },
                     "total": {
+                        "example": 1,
                         "minimum": 0,
                         "type": "integer"
                     }
@@ -326,7 +327,7 @@
                                 }
                             }
                         },
-                        "description": "Invalid PDF, too many pages, missing or ambiguous PDF417 barcode, or invalid BCBP"
+                        "description": "Invalid PDF, too many pages, missing or ambiguous PDF417 barcode, invalid BCBP, or airport not found"
                     },
                     "500": {
                         "content": {
@@ -356,7 +357,7 @@
                                 }
                             }
                         },
-                        "description": "Both processing slots are busy; retry after one second",
+                        "description": "Both processing slots or all four upload slots are busy; retry after one second",
                         "headers": {
                             "Retry-After": {
                                 "description": "Seconds to wait before retrying (1)",

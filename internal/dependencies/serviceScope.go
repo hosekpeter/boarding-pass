@@ -78,6 +78,6 @@ func NewServiceScope(ctx context.Context, cfg config.Config) (ServiceScope, erro
 		base:       NewBase(logger),
 		db:         database,
 		repository: repository,
-		parser:     service.New(extractor, airports, repository),
+		parser:     service.New(logger, extractor, airports, repository),
 	}, nil
 }

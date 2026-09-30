@@ -139,6 +139,7 @@ components:
           minimum: 0
           type: integer
         total:
+          example: 1
           minimum: 0
           type: integer
       required:
@@ -236,7 +237,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/api.ErrorResponse'
           description: Invalid PDF, too many pages, missing or ambiguous PDF417 barcode,
-            or invalid BCBP
+            invalid BCBP, or airport not found
         "500":
           content:
             application/json:
@@ -254,7 +255,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/api.ErrorResponse'
-          description: Both processing slots are busy; retry after one second
+          description: Both processing slots or all four upload slots are busy; retry
+            after one second
           headers:
             Retry-After:
               description: Seconds to wait before retrying (1)

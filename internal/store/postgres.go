@@ -32,7 +32,7 @@ type Filter struct {
 
 type Page struct {
 	Items  []Record `json:"items"`
-	Total  int      `json:"total" minimum:"0"`
+	Total  int      `json:"total" minimum:"0" example:"1"`
 	Limit  int      `json:"limit" minimum:"1" maximum:"100" example:"20"`
 	Offset int      `json:"offset" minimum:"0" maximum:"2147483647" example:"0"`
 }

@@ -3,6 +3,8 @@ package service_test
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
 	"boarding-pass/internal/bcbp"
@@ -48,10 +50,12 @@ func (s *repositoryStub) List(context.Context, store.Filter) (store.Page, error)
 
 const validPayload = "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 100"
 
+func testLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
+
 func TestParseEnrichesBeforeSave(t *testing.T) {
 	airports := &lookupStub{}
 	repo := &repositoryStub{}
-	parser := service.New(extractorStub{value: validPayload}, airports, repo)
+	parser := service.New(testLogger(), extractorStub{value: validPayload}, airports, repo)
 	pass, err := parser.Parse(context.Background(), []byte("PDF"))
 	require.NoError(t, err)
 	wantOrigin := bcbp.Airport{Code: "KSC", AirportName: "Airport", CityName: "City", Country: "Country"}
@@ -73,10 +77,11 @@ func TestFailuresAreNotSaved(t *testing.T) {
 		{"extract", extractorStub{err: pdf.ErrInvalid}, nil, pdf.ErrInvalid},
 		{"parse", extractorStub{value: "bad"}, nil, service.ErrInvalidBCBP},
 		{"enrich", extractorStub{value: validPayload}, errors.New("offline"), nil},
+		{"unknown airport", extractorStub{value: validPayload}, skypicker.ErrNotFound, skypicker.ErrNotFound},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			repo := &repositoryStub{}
-			_, err := service.New(tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(context.Background(), nil)
+			_, err := service.New(testLogger(), tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(context.Background(), nil)
 			require.Error(t, err)
 			if tc.want != nil {
 				assert.ErrorIs(t, err, tc.want)
@@ -88,14 +93,14 @@ func TestFailuresAreNotSaved(t *testing.T) {
 
 func TestSaveFailureIsReturned(t *testing.T) {
 	failure := errors.New("disk full")
-	_, err := service.New(extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(context.Background(), nil)
+	_, err := service.New(testLogger(), extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(context.Background(), nil)
 	require.ErrorIs(t, err, failure)
 }
 
 func TestRepeatedAirportsResolvedOnce(t *testing.T) {
 	payload := "M2" + validPayload[2:] + validPayload[23:]
 	airports := &lookupStub{}
-	pass, err := service.New(extractorStub{value: payload}, airports, &repositoryStub{}).Parse(context.Background(), nil)
+	pass, err := service.New(testLogger(), extractorStub{value: payload}, airports, &repositoryStub{}).Parse(context.Background(), nil)
 	require.NoError(t, err)
 	assert.Len(t, pass.Legs, 2)
 	assert.Equal(t, 2, airports.calls)

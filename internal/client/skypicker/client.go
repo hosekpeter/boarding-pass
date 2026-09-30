@@ -15,7 +15,10 @@ import (
 
 const DefaultBaseURL = "https://api.skypicker.com"
 
-var ErrUnavailable = errors.New("airport lookup unavailable")
+var (
+	ErrUnavailable = errors.New("airport lookup unavailable")
+	ErrNotFound    = errors.New("airport not found in Locations API")
+)
 
 type cacheEntry struct {
 	airport Airport
@@ -98,6 +101,11 @@ func (c *Client) Lookup(ctx context.Context, code string) (Airport, error) {
 	if err := json.Unmarshal(data, &result); err != nil {
 		return Airport{}, fmt.Errorf("%w: invalid JSON", ErrUnavailable)
 	}
+
+	if result.Locations != nil && len(result.Locations) == 0 {
+		return Airport{}, fmt.Errorf("%w: %s", ErrNotFound, code)
+	}
+
 	for _, loc := range result.Locations {
 		if loc.Code != code || loc.Type != "airport" {
 			continue

@@ -50,7 +50,7 @@ func TestLookupFailuresAreNotCached(t *testing.T) {
 		status int
 		body   string
 	}{
-		{"upstream", 503, `{}`}, {"invalid JSON", 200, `{`}, {"no airport", 200, `{"locations":[]}`},
+		{"upstream", 503, `{}`}, {"invalid JSON", 200, `{`}, {"missing locations", 200, `{}`},
 		{"wrong airport", 200, strings.ReplaceAll(airportJSON, "PRG", "KSC")},
 		{"city instead of airport", 200, strings.ReplaceAll(airportJSON, `"type":"airport"`, `"type":"city"`)},
 		{"incomplete", 200, `{"locations":[{"code":"PRG","type":"airport"}]}`},
@@ -74,6 +74,18 @@ func TestLookupFailuresAreNotCached(t *testing.T) {
 			assert.Equal(t, 2, calls, "cached a failure")
 		})
 	}
+}
+
+func TestUnknownAirportIsNotAnOutage(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"locations":[]}`)
+	}))
+	defer server.Close()
+	client, err := New(server.URL, server.Client())
+	require.NoError(t, err)
+	_, err = client.Lookup(t.Context(), "ZZZ")
+	assert.ErrorIs(t, err, ErrNotFound)
+	assert.NotErrorIs(t, err, ErrUnavailable)
 }
 
 func TestLookupCancellation(t *testing.T) {
