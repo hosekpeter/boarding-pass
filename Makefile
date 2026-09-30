@@ -4,7 +4,8 @@ SWAG_VERSION ?= v2.0.0-rc6
 DOC_DIR ?= docs
 SWAG_DIRS ?= internal/api,internal/bcbp,internal/store
 SWAG_MAIN ?= api.go
-SWAG = go run github.com/swaggo/swag/v2/cmd/swag@$(SWAG_VERSION) init \
+SWAG_BIN := $(CURDIR)/bin/tools/$(SWAG_VERSION)/swag
+SWAG = $(SWAG_BIN) init \
 	--v3.1 --parseInternal --parseDependency=false --parseDepth=1 --requiredByDefault \
 	--outputTypes json,yaml -d $(SWAG_DIRS) -g $(SWAG_MAIN)
 
@@ -13,11 +14,14 @@ run:
 	go run .
 build:
 	go build -trimpath -o bin/boarding-pass .
-docs:
+$(SWAG_BIN):
+	@mkdir -p $(dir $(SWAG_BIN))
+	GOBIN=$(dir $(SWAG_BIN)) go install github.com/swaggo/swag/v2/cmd/swag@$(SWAG_VERSION)
+docs: $(SWAG_BIN)
 	@echo "Generating API documentation into $(DOC_DIR) using Swag $(SWAG_VERSION)"
 	@$(SWAG) -o $(DOC_DIR)
 	@echo "Docs generated to $(DOC_DIR)/swagger.json and $(DOC_DIR)/swagger.yaml"
-docs-check:
+docs-check: $(SWAG_BIN)
 	@set -eu; output=$$(mktemp -d); trap 'rm -rf "$$output"' EXIT; \
 		$(SWAG) --quiet --output "$$output"; \
 		for file in swagger.json swagger.yaml; do \

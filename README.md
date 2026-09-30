@@ -30,7 +30,7 @@ You can also try the included boarding pass with curl:
 
 ```bash
 curl --fail-with-body \
-  -F 'file=@testdata/boarding_pass.pdf;type=application/pdf' \
+  -F 'file=@boarding_pass.pdf;type=application/pdf' \
   http://localhost:8080/boarding-pass/parse-from-file
 
 curl --fail-with-body 'http://localhost:8080/boarding-passes?limit=20&offset=0'
@@ -166,7 +166,7 @@ without credentials, query parameters or a fragment.
 
 ```bash
 curl --fail-with-body \
-  -F 'file=@testdata/boarding_pass.pdf;type=application/pdf' \
+  -F 'file=@boarding_pass.pdf;type=application/pdf' \
   http://localhost:8080/boarding-pass/parse-from-file
 
 curl --fail-with-body \
@@ -207,8 +207,10 @@ make docs         # Regenerate docs/swagger.json and docs/swagger.yaml
 make docs-check   # Check that both committed specifications are current
 ```
 
-The Makefile pins `SWAG_VERSION` and runs the generator with `go run`; no global Swag
-installation is needed. It uses Swag v2's OpenAPI 3.1 support (currently a release
+The Makefile pins `SWAG_VERSION` and installs the generator once under the ignored
+`bin/tools/<version>/` directory; no global Swag installation is needed. After that
+first download, generation and checks work offline with cached Go dependencies.
+The Docker test image includes the generator. It uses Swag v2's OpenAPI 3.1 support (currently a release
 candidate); the generator is only used during development and checks. Commit both
 generated files with the code change and rebuild/restart the API to serve them.
 `make check`, Docker checks, and CI
@@ -226,9 +228,9 @@ Errors use a consistent JSON envelope:
 | 400 | Malformed multipart, missing/duplicate file, empty upload, or invalid query |
 | 413 | Multipart request exceeds 10 MiB, including its framing |
 | 415 | Wrong request type or uploaded bytes do not begin with a PDF header |
-| 422 | Corrupt/encrypted PDF, over 10 pages, unreadable/ambiguous barcode, or invalid BCBP |
+| 422 | Corrupt/encrypted PDF, over 10 pages, unreadable/ambiguous barcode, invalid BCBP, or airport absent from the Locations API |
 | 502 | Airport API failed or did not return complete airport information |
-| 503 | Both parser slots are occupied; `Retry-After: 1` |
+| 503 | Both parser slots or all four upload slots are occupied; `Retry-After: 1` |
 | 504 | Processing deadline exceeded |
 | 500 | Internal processing or persistence failure |
 
@@ -282,7 +284,7 @@ installed and a PostgreSQL service container.
 
 ## Design choices
 
-The application uses `net/http` for routing and a shared `pgx/v5/pgxpool`
+The application uses `chi` on `net/http` for routing and a shared `pgx/v5/pgxpool`
 PostgreSQL pool, with a configurable maximum of 20 and minimum of 2 connections
 by default. Records use UUID identifiers, `TIMESTAMPTZ` timestamps, and `JSONB`
 for the decoded boarding pass. Queries use positional SQL parameters; the
@@ -295,8 +297,8 @@ newest-first ordering, with insertion sequence breaking timestamp ties.
 Embedded [Goose migrations](internal/db/migrations) run transactionally at
 startup under a PostgreSQL advisory lock, allowing concurrent application starts.
 Goose tracks applied versions; the first migration creates the table and index.
-Only migrations use a `database/sql` adapter over the same pool. Existing SQLite files from earlier versions are not read
-or deleted by this implementation.
+Migrations use a separate, short-lived `database/sql` connection governed by the
+startup deadline. The shorter `DB_STATEMENT_TIMEOUT` applies to application queries.
 
 At startup, `main` loads configuration,
 creates `dependencies.NewServiceScope(ctx, cfg)`, defers `scope.Close()`, and runs
@@ -319,7 +321,10 @@ The request flows through small packages:
    handles status codes, and serves documentation.
 2. `internal/pdf` renders every page using Poppler and decodes PDF417 with
    [`zxinggo`](https://github.com/ericlevine/zxinggo). Rendering handles both image
-   and vector barcodes. Pages are limited to 2400 pixels on their longest side.
+   and vector barcodes. Rendering targets 2400 pixels on the longest side, with
+   a one-pixel tolerance for Poppler rounding. Tool stdout is capped at 64 KiB;
+   oversized metadata and ambiguous page counts are rejected. Stderr diagnostics
+   are capped at 4 KiB, and output-file or process failures return HTTP 500.
 3. `internal/bcbp` parses fixed-width format M fields for 1–4 legs and respects
    the hexadecimal lengths of optional sections. Field positions and widths are
    named in `internal/bcbp/layout.go`; `Parse` delegates header, flight-leg, and
@@ -353,7 +358,9 @@ barcodes, request bodies, or query strings. Responses use `Cache-Control: no-sto
   pages and barcode orientations; a scan already in progress is not preempted. Container limits add
   an OS-level resource bound. Tiny/damaged barcodes may require a higher rendering
   resolution or a different decoder in a future version.
-- Missing airport details fail the parse with 502 instead of inventing data. Warm
+- An empty airport lookup returns 422 (`airport_not_found`), including real codes
+  missing from the provider's dataset. Upstream failures or malformed responses
+  return 502 (`locations_unavailable`). Neither case saves a partial record. Warm
   airport cache entries can serve requests during short upstream outages. The
   cache is per process and resets on restart.
 - The API intentionally has no accounts. Localhost is the default. Before shared
