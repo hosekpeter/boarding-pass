@@ -23,27 +23,31 @@ func TestDocumentation(t *testing.T) {
 			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
 			require.Equal(t, http.StatusOK, resp.Code)
 			assert.Equal(t, "text/html; charset=utf-8", resp.Header().Get("Content-Type"))
-			assert.Contains(t, resp.Body.String(), `url: "/documentation/swagger.json"`)
-			assert.Contains(t, resp.Body.String(), `src="/documentation/swagger-ui-bundle.js"`)
-			assert.Contains(t, resp.Body.String(), `href="/documentation/swagger-ui.css"`)
+			assert.Contains(t, resp.Body.String(), `"openapi":"3.1.0"`)
+			assert.Contains(t, resp.Body.String(), `"/boarding-pass/parse-from-file"`)
+			assert.Contains(t, resp.Body.String(), `rel="icon" href="data:,"`)
+			assert.NotContains(t, resp.Body.String(), `<script src=`)
+			assert.NotContains(t, resp.Body.String(), `rel="stylesheet"`)
+			assert.NotContains(t, resp.Body.String(), `sourceMappingURL=`)
 			assert.Contains(t, resp.Body.String(), "validatorUrl: null")
 		})
 	}
-	for _, asset := range []struct{ path, contentType string }{
-		{"/documentation/swagger-ui-bundle.js", "javascript"},
-		{"/documentation/swagger-ui.css", "text/css"},
+	for _, path := range []string{
+		"/documentation/index.html",
+		"/documentation/swagger-ui-bundle.js",
+		"/documentation/swagger-ui.css",
 	} {
-		t.Run(asset.path, func(t *testing.T) {
+		t.Run(path, func(t *testing.T) {
 			t.Parallel()
 
 			resp := httptest.NewRecorder()
-			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, asset.path, nil))
-			require.Equal(t, http.StatusOK, resp.Code)
-			assert.Contains(t, resp.Header().Get("Content-Type"), asset.contentType)
-			assert.NotEmpty(t, resp.Body.Bytes())
+			handler.ServeHTTP(resp, httptest.NewRequest(http.MethodGet, path, nil))
+			require.Equal(t, http.StatusNotFound, resp.Code)
+			assert.Empty(t, resp.Header().Get("Location"))
+			assertError(t, resp, "not_found")
 		})
 	}
-	for _, path := range []string{"/documentation", "/documentation/", "/documentation/swagger-ui.css", "/documentation/swagger.json", "/documentation/swagger.yaml", "/openapi.yaml"} {
+	for _, path := range []string{"/documentation", "/documentation/", "/documentation/swagger.json", "/documentation/swagger.yaml", "/openapi.yaml"} {
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, httptest.NewRequest(http.MethodPost, path, nil))
 		assert.Equal(t, http.StatusMethodNotAllowed, resp.Code, path)

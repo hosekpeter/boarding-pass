@@ -189,7 +189,9 @@ combined. `total` is counted before pagination. No matches return `items: []`.
 Each successful POST creates a new history record, even for a repeated upload.
 
 Swagger UI is served at [`GET /documentation`](http://localhost:8080/documentation).
-Its JavaScript and CSS are embedded in the application; no CDN is needed.
+The page includes its JavaScript, CSS, and OpenAPI specification, so opening it
+requires one HTTP request and no CDN. Use `/documentation` directly;
+`/documentation/index.html` is not a route.
 Requests from **Try it out** use the same server and port as the documentation page.
 The generated OpenAPI 3.1 specification is available as [JSON](docs/swagger.json)
 at `GET /documentation/swagger.json` and [YAML](docs/swagger.yaml) at

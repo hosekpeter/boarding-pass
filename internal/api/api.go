@@ -21,8 +21,6 @@ import (
 	"boarding-pass/internal/store"
 
 	"github.com/go-chi/chi/v5"
-
-	swaggerFiles "github.com/swaggo/files/v2"
 )
 
 const MaxUploadBytes int64 = 10 << 20
@@ -80,7 +78,6 @@ func New(scope dependencies.ServiceScope) http.Handler {
 	mux.Get("/documentation/", documentation)
 	mux.Get("/documentation/swagger.json", specJSON)
 	mux.Get("/documentation/swagger.yaml", specYAML)
-	mux.Get("/documentation/*", http.StripPrefix("/documentation/", http.FileServer(http.FS(swaggerFiles.FS))).ServeHTTP)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")

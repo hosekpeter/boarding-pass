@@ -56,5 +56,5 @@ func specYAML(w http.ResponseWriter, r *http.Request) {
 // @Router /documentation [get]
 func documentation(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_, _ = w.Write(docs.Index)
+	_, _ = w.Write(docs.Documentation)
 }
