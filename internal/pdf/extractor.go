@@ -23,6 +23,7 @@ var (
 	ErrNoBarcode    = errors.New("no readable PDF417 barcode found")
 	ErrMultiple     = errors.New("PDF contains multiple distinct boarding passes")
 	ErrTooManyPages = errors.New("PDF exceeds the 10-page limit")
+	errOutputLimit  = errors.New("PDF tool output exceeds its limit")
 )
 
 const MaxPages = 10
@@ -62,10 +63,7 @@ func (e *Extractor) Extract(ctx context.Context, data []byte) (string, error) {
 
 	info, err := command(ctx, e.infoPath, path)
 	if err != nil {
-		if ctx.Err() != nil {
-			return "", ctx.Err()
-		}
-		return "", ErrInvalid
+		return "", processError(ctx, err)
 	}
 	pages, err := pageCount(string(info))
 	if err != nil {
@@ -77,10 +75,7 @@ func (e *Extractor) Extract(ctx context.Context, data []byte) (string, error) {
 		_, err := command(ctx, e.renderPath, "-f", strconv.Itoa(page), "-l", strconv.Itoa(page),
 			"-singlefile", "-scale-to", strconv.Itoa(maxDimension), "-gray", "-png", path, prefix)
 		if err != nil {
-			if ctx.Err() != nil {
-				return "", ctx.Err()
-			}
-			return "", ErrInvalid
+			return "", processError(ctx, err)
 		}
 		results, err := decodeImage(ctx, prefix+".png")
 		if err != nil {
@@ -109,7 +104,8 @@ func decodeImage(ctx context.Context, path string) ([]*zxing.Result, error) {
 	}
 	defer f.Close()
 	config, err := png.DecodeConfig(f)
-	if err != nil || config.Width > maxDimension || config.Height > maxDimension {
+	// Poppler can round a scaled edge up by one pixel.
+	if err != nil || config.Width > maxDimension+1 || config.Height > maxDimension+1 {
 		return nil, ErrInvalid
 	}
 	if _, err := f.Seek(0, 0); err != nil {
@@ -147,19 +143,41 @@ func decodeImage(ctx context.Context, path string) ([]*zxing.Result, error) {
 }
 
 func pageCount(info string) (int, error) {
+	var pages int
 	for line := range strings.SplitSeq(info, "\n") {
 		if value, ok := strings.CutPrefix(line, "Pages:"); ok {
 			n, err := strconv.Atoi(strings.TrimSpace(value))
-			if err != nil || n < 1 {
+			// Metadata can contain newlines. Reject an injected Pages field
+			// rather than accepting it before the real count printed by pdfinfo.
+			if err != nil || n < 1 || pages != 0 {
 				return 0, ErrInvalid
 			}
-			if n > MaxPages {
-				return 0, ErrTooManyPages
-			}
-			return n, nil
+			pages = n
 		}
 	}
-	return 0, ErrInvalid
+	if pages == 0 {
+		return 0, ErrInvalid
+	}
+	if pages > MaxPages {
+		return 0, ErrTooManyPages
+	}
+	return pages, nil
+}
+
+func processError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if errors.Is(err, errOutputLimit) {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	// Poppler uses 1 for an unreadable PDF, 3 for PDF permission errors,
+	// and 2 for output-file failures. Signals and execution errors are server failures.
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && (exit.ExitCode() == 1 || exit.ExitCode() == 3) {
+		return fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return err
 }
 
 // Retain only a small amount of command output, even for a hostile PDF. No shell
@@ -168,20 +186,31 @@ func command(ctx context.Context, path string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	output := &boundedBuffer{remaining: 64 << 10}
+	stderr := &boundedBuffer{remaining: 4 << 10}
 	cmd.Stdout = output
+	cmd.Stderr = stderr
 	err := cmd.Run()
-	return output.Bytes(), err
+	if err != nil {
+		return output.buffer.Bytes(), fmt.Errorf("%s: %w; stderr: %q", filepath.Base(path), err, stderr.buffer.String())
+	}
+	if output.truncated {
+		return output.buffer.Bytes(), errOutputLimit
+	}
+	return output.buffer.Bytes(), nil
 }
 
 type boundedBuffer struct {
-	bytes.Buffer
+	// Do not embed bytes.Buffer: its ReadFrom would bypass Write in io.Copy.
+	buffer    bytes.Buffer
 	remaining int
+	truncated bool
 }
 
 func (b *boundedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
 	keep := min(n, b.remaining)
-	_, _ = b.Buffer.Write(p[:keep])
+	_, _ = b.buffer.Write(p[:keep])
 	b.remaining -= keep
+	b.truncated = b.truncated || keep < n
 	return n, nil
 }

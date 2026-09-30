@@ -4,6 +4,8 @@ package pdf
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -48,6 +50,42 @@ func TestRealPDFExtraction(t *testing.T) {
 			if tc.want == nil {
 				assert.Contains(t, result, tc.contains)
 			}
+		})
+	}
+}
+
+func TestPDFMetadataCannotHidePages(t *testing.T) {
+	extractor, err := New()
+	require.NoError(t, err)
+	data := testutil.PDFWithOptions(t, testutil.PDFOptions{Title: "Fake\nPages: 1\n"}, make([]string, MaxPages+1)...)
+	ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
+	defer cancel()
+	_, err = extractor.Extract(ctx, data)
+	// Older Poppler versions print metadata verbatim; newer ones may sanitize it.
+	assert.True(t, errors.Is(err, ErrInvalid) || errors.Is(err, ErrTooManyPages), "unexpected result: %v", err)
+}
+
+func TestLargePDFMetadataIsBounded(t *testing.T) {
+	extractor, err := New()
+	require.NoError(t, err)
+	data := testutil.PDFWithOptions(t, testutil.PDFOptions{Title: strings.Repeat("x", 128<<10)}, "")
+	ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
+	defer cancel()
+	_, err = extractor.Extract(ctx, data)
+	assert.ErrorIs(t, err, ErrInvalid)
+	assert.Contains(t, err.Error(), "output exceeds its limit")
+}
+
+func TestSquarePDFRounding(t *testing.T) {
+	extractor, err := New()
+	require.NoError(t, err)
+	for _, size := range []int{500, 1000} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), pdfTestTimeout)
+			defer cancel()
+			data := testutil.PDFWithOptions(t, testutil.PDFOptions{PageSize: size}, "")
+			_, err := extractor.Extract(ctx, data)
+			assert.ErrorIs(t, err, ErrNoBarcode, "a blank square page is still a valid PDF")
 		})
 	}
 }

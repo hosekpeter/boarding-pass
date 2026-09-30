@@ -1,7 +1,9 @@
 package pdf
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -22,6 +24,8 @@ func TestPageCount(t *testing.T) {
 	}{
 		{"Title: Sample\nPages: 2\n", 2, nil}, {"Pages: 10", 10, nil}, {"Pages: 11", 0, ErrTooManyPages},
 		{"Pages: -1", 0, ErrInvalid}, {"Pages: zero", 0, ErrInvalid}, {"missing", 0, ErrInvalid},
+		{"Title: Fake\nPages: 1\nPages: 11\n", 0, ErrInvalid},
+		{"Pages: 2\nPages: 2\n", 0, ErrInvalid},
 	} {
 		n, err := pageCount(tc.info)
 		assert.Equal(t, tc.count, n, tc.info)
@@ -35,7 +39,57 @@ func TestBoundedCommandOutput(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 7, n)
 	_, _ = b.Write([]byte("more"))
-	assert.Equal(t, "1234", b.String())
+	assert.Equal(t, "1234", b.buffer.String())
+	assert.True(t, b.truncated)
+}
+
+func TestActualCommandOutputIsBounded(t *testing.T) {
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	t.Setenv("PDF_TEST_COMMAND", "large-output")
+	output, err := command(t.Context(), executable, "-test.run=^TestPDFCommandHelper$")
+	require.ErrorIs(t, err, errOutputLimit)
+	assert.Len(t, output, 64<<10)
+	assert.ErrorIs(t, processError(t.Context(), err), ErrInvalid)
+}
+
+func TestCommandFailures(t *testing.T) {
+	executable, err := os.Executable()
+	require.NoError(t, err)
+	for _, code := range []int{1, 2, 3, 99} {
+		t.Run(fmt.Sprint(code), func(t *testing.T) {
+			t.Setenv("PDF_TEST_COMMAND", fmt.Sprint(code))
+			_, err := command(t.Context(), executable, "-test.run=^TestPDFCommandHelper$")
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), "diagnostic")
+			assert.Less(t, len(err.Error()), 5000, "stderr must also be bounded")
+			err = processError(t.Context(), err)
+			if code == 1 || code == 3 {
+				assert.ErrorIs(t, err, ErrInvalid)
+			} else {
+				assert.NotErrorIs(t, err, ErrInvalid)
+			}
+		})
+	}
+	_, err = command(t.Context(), filepath.Join(t.TempDir(), "missing-pdftoppm"))
+	require.Error(t, err)
+	assert.NotErrorIs(t, processError(t.Context(), err), ErrInvalid)
+}
+
+// A real child process exercises os/exec's io.Copy path, including ReaderFrom.
+func TestPDFCommandHelper(t *testing.T) {
+	mode := os.Getenv("PDF_TEST_COMMAND")
+	if mode == "" {
+		return
+	}
+	if mode == "large-output" {
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("x"), 1<<20))
+		os.Exit(0)
+	}
+	_, _ = fmt.Fprint(os.Stderr, "diagnostic: "+strings.Repeat("x", 1<<20))
+	var code int
+	_, _ = fmt.Sscan(mode, &code)
+	os.Exit(code)
 }
 
 func TestEarlyRejection(t *testing.T) {

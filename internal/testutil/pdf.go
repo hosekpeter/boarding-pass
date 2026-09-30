@@ -19,8 +19,18 @@ type PDFBarcode struct {
 	Transform string
 }
 
+type PDFOptions struct {
+	Title    string
+	PageSize int
+}
+
 // PDF places one barcode on each page; an empty payload makes a blank page.
 func PDF(t testing.TB, payloads ...string) []byte {
+	t.Helper()
+	return PDFWithOptions(t, PDFOptions{}, payloads...)
+}
+
+func PDFWithOptions(t testing.TB, options PDFOptions, payloads ...string) []byte {
 	t.Helper()
 	pages := make([][]PDFBarcode, len(payloads))
 	for i, payload := range payloads {
@@ -28,12 +38,20 @@ func PDF(t testing.TB, payloads ...string) []byte {
 			pages[i] = []PDFBarcode{{Payload: payload, Transform: "1 0 0 1 30 30"}}
 		}
 	}
-	return BarcodePDF(t, pages...)
+	return barcodePDF(t, options, pages...)
 }
 
 // BarcodePDF produces valid PDFs without depending on the production decoder.
 func BarcodePDF(t testing.TB, pages ...[]PDFBarcode) []byte {
 	t.Helper()
+	return barcodePDF(t, PDFOptions{}, pages...)
+}
+
+func barcodePDF(t testing.TB, options PDFOptions, pages ...[]PDFBarcode) []byte {
+	t.Helper()
+	if options.PageSize == 0 {
+		options.PageSize = 800
+	}
 	var kids strings.Builder
 	for i := range pages {
 		fmt.Fprintf(&kids, "%d 0 R ", 3+2*i)
@@ -55,8 +73,14 @@ func BarcodePDF(t testing.TB, pages ...[]PDFBarcode) []byte {
 			content.WriteString("Q\n")
 		}
 		objects = append(objects,
-			fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 800 800] /Resources << >> /Contents %d 0 R >>", 4+2*i),
+			fmt.Sprintf("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %d %d] /Resources << >> /Contents %d 0 R >>", options.PageSize, options.PageSize, 4+2*i),
 			fmt.Sprintf("<< /Length %d >>\nstream\n%sendstream", content.Len(), content.String()))
+	}
+	var info string
+	if options.Title != "" {
+		title := strings.NewReplacer(`\`, `\\`, "(", `\(`, ")", `\)`).Replace(options.Title)
+		objects = append(objects, fmt.Sprintf("<< /Title (%s) >>", title))
+		info = fmt.Sprintf(" /Info %d 0 R", len(objects))
 	}
 	var out bytes.Buffer
 	out.WriteString("%PDF-1.4\n")
@@ -70,7 +94,7 @@ func BarcodePDF(t testing.TB, pages ...[]PDFBarcode) []byte {
 	for _, offset := range offsets {
 		fmt.Fprintf(&out, "%010d 00000 n \n", offset)
 	}
-	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, xref)
+	fmt.Fprintf(&out, "trailer\n<< /Size %d /Root 1 0 R%s >>\nstartxref\n%d\n%%%%EOF\n", len(objects)+1, info, xref)
 	return out.Bytes()
 }
 
