@@ -56,7 +56,7 @@ func (s *repoStub) Save(context.Context, bcbp.BoardingPass) error {
 	return errors.New("unexpected direct save from HTTP handler")
 }
 
-func logger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func logger() *slog.Logger { return base.NewJSONLogger(io.Discard) }
 
 func upload(t *testing.T, fields []string, body []byte) *http.Request {
 	t.Helper()
@@ -281,7 +281,7 @@ func TestRequestLogging(t *testing.T) {
 			} else if status == 500 {
 				parser.err = errors.New("renderer failed")
 			}
-			handler := newTestAPI(parser, &repoStub{}, slog.New(slog.NewJSONHandler(&logs, nil)))
+			handler := newTestAPI(parser, &repoStub{}, base.NewJSONLogger(&logs))
 			req := upload(t, []string{"file"}, []byte("%PDF-1.4"))
 			if status == 400 {
 				req = httptest.NewRequest(http.MethodGet, "/boarding-passes?passenger_name=SECRET&limit=bad", nil)
@@ -346,7 +346,7 @@ func TestPanicUsesErrorEnvelopeAndIsLogged(t *testing.T) {
 	t.Parallel()
 
 	var logs bytes.Buffer
-	handler := newTestAPI(panicParser{}, &repoStub{}, slog.New(slog.NewJSONHandler(&logs, nil)))
+	handler := newTestAPI(panicParser{}, &repoStub{}, base.NewJSONLogger(&logs))
 	resp := httptest.NewRecorder()
 	handler.ServeHTTP(resp, upload(t, []string{"file"}, []byte("%PDF-1.4")))
 	assert.Equal(t, http.StatusInternalServerError, resp.Code)

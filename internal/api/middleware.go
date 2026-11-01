@@ -1,26 +1,22 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"runtime/debug"
 	"time"
 
+	"boarding-pass/internal/base"
+
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/google/uuid"
 )
 
-type requestContextKey string
-
-const requestIDContextKey requestContextKey = "request_id"
-
-func requestIDFromContext(ctx context.Context) string {
-	requestID, _ := ctx.Value(requestIDContextKey).(string)
-	return requestID
-}
-
+// requestContext stores the request ID in the request context (see
+// base.WithRequestID), echoes it in X-Request-ID, and logs every response with
+// its status. Loggers built with base.NewLogHandler add the request ID to every
+// record logged with the request context.
 func requestContext(logger *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +27,7 @@ func requestContext(logger *slog.Logger) func(http.Handler) http.Handler {
 				requestID = uuid.New().String()
 			}
 
-			ctx := context.WithValue(r.Context(), requestIDContextKey, requestID)
+			ctx := base.WithRequestID(r.Context(), requestID)
 			r = r.WithContext(ctx)
 			w.Header().Set("X-Request-ID", requestID)
 			wrapped := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
@@ -47,7 +43,6 @@ func requestContext(logger *slog.Logger) func(http.Handler) http.Handler {
 					level = slog.LevelWarn
 				}
 				logger.Log(ctx, level, "request_finished",
-					"request_id", requestID,
 					"duration", time.Since(startedAt).Nanoseconds(),
 					slog.Group("http",
 						"method", r.Method,
@@ -74,8 +69,7 @@ func recoverPanic(logger *slog.Logger) func(http.Handler) http.Handler {
 					panic(recovered)
 				}
 
-				logger.Error("request_panic",
-					"request_id", requestIDFromContext(r.Context()),
+				logger.ErrorContext(r.Context(), "request_panic",
 					slog.Group("http", "method", r.Method, "url", r.URL.Path),
 					slog.Group("error",
 						"kind", fmt.Sprintf("%T", recovered),

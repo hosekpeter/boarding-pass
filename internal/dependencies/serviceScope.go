@@ -3,7 +3,6 @@ package dependencies
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 
 	"boarding-pass/internal/base"
@@ -46,7 +45,7 @@ func NewServiceScope(ctx context.Context, cfg config.Config) (ServiceScope, erro
 		return nil, fmt.Errorf("validate configuration: %w", err)
 	}
 
-	b := base.New(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	b := base.New(base.NewJSONLogger(os.Stdout))
 
 	extractor, err := pdf.New()
 	if err != nil {

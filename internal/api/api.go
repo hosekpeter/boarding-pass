@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"mime"
@@ -127,7 +128,11 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 
 	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
 	if err != nil || contentType != "multipart/form-data" {
-		a.logger.Error("invalid content type", "error", err, "content-type", r.Header.Get("Content-Type"))
+		attrs := []any{"content-type", r.Header.Get("Content-Type")}
+		if err != nil {
+			attrs = append(attrs, "error", err)
+		}
+		a.logger.ErrorContext(r.Context(), "invalid content type", attrs...)
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Expected multipart/form-data with a PDF file")
 		return
 	}
@@ -141,17 +146,17 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 
 	if err := r.ParseMultipartForm(1 << 20); err != nil {
 		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
-			a.logger.Error("upload too large", "error", err)
+			a.logger.ErrorContext(r.Context(), "upload too large", "error", err)
 			writeError(w, http.StatusRequestEntityTooLarge, "upload_too_large", "Multipart request exceeds 10 MiB")
 		} else {
-			a.logger.Error("invalid upload", "error", err)
+			a.logger.ErrorContext(r.Context(), "invalid upload", "error", err)
 			writeError(w, http.StatusBadRequest, "invalid_upload", "Invalid multipart request")
 		}
 		return
 	}
 
 	if len(r.MultipartForm.File) != 1 || len(r.MultipartForm.File["file"]) != 1 {
-		a.logger.Error("invalid upload", "error", err)
+		a.logger.ErrorContext(r.Context(), "invalid upload")
 		writeError(w, http.StatusBadRequest, "invalid_upload", "Provide exactly one PDF in the file field")
 		return
 	}
@@ -169,27 +174,25 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 
 	f, err := r.MultipartForm.File["file"][0].Open()
 	if err != nil {
-		a.logger.Error("failed to open uploaded file", "error", err)
-		a.fail(w, err)
+		a.fail(w, r, fmt.Errorf("open uploaded file: %w", err))
 		return
 	}
 	defer f.Close()
 
 	data, err := io.ReadAll(f)
 	if err != nil {
-		a.logger.Error("failed to read uploaded file", "error", err)
-		a.fail(w, err)
+		a.fail(w, r, fmt.Errorf("read uploaded file: %w", err))
 		return
 	}
 
 	if len(data) == 0 {
-		a.logger.Error("empty file", "error", err)
+		a.logger.ErrorContext(r.Context(), "empty file")
 		writeError(w, http.StatusBadRequest, "empty_file", "The uploaded file is empty")
 		return
 	}
 
 	if len(data) < 5 || string(data[:5]) != "%PDF-" {
-		a.logger.Error("invalid file type", "error", err)
+		a.logger.ErrorContext(r.Context(), "invalid file type")
 		writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "The uploaded file must be a PDF")
 		return
 	}
@@ -198,12 +201,18 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	pass, err := a.parser.Parse(ctx, data)
-	if ctx.Err() != nil {
-		err = ctx.Err()
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		// The response is mapped from the context error alone; the parser's
+		// error is logged as the cause of the interruption.
+		var attrs []slog.Attr
+		if err != nil {
+			attrs = append(attrs, slog.Any("cause", err))
+		}
+		a.fail(w, r, fmt.Errorf("parse boarding pass: %w", ctxErr), attrs...)
+		return
 	}
 	if err != nil {
-		a.logger.Error("failed to parse boarding pass", "error", err)
-		a.fail(w, err)
+		a.fail(w, r, fmt.Errorf("parse boarding pass: %w", err))
 		return
 	}
 
@@ -231,19 +240,16 @@ func (a *API) list(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 
-	ctxAttr := context.WithValue(ctx, requestIDContextKey, requestIDFromContext(r.Context()))
-
 	query, err := parseFilter(r)
 	if err != nil {
-		a.logger.ErrorContext(ctxAttr, "invalid query parameters", "error", err)
+		a.logger.ErrorContext(ctx, "invalid query parameters", "error", err)
 		writeError(w, http.StatusBadRequest, "invalid_query", err.Error())
 		return
 	}
 
-	page, err := a.repository.List(ctxAttr, query)
+	page, err := a.repository.List(ctx, query)
 	if err != nil {
-		a.logger.ErrorContext(ctxAttr, "failed to list boarding passes", "error", err)
-		a.fail(w, err)
+		a.fail(w, r, fmt.Errorf("list boarding passes: %w", err))
 		return
 	}
 	writeJSON(w, http.StatusOK, page)
@@ -292,29 +298,40 @@ func parseFilter(r *http.Request) (store.Filter, error) {
 	return f, nil
 }
 
-func (a *API) fail(w http.ResponseWriter, err error) {
+// fail maps err to an error response. Server-side failures (status >= 500) are
+// logged here with the underlying error and the optional extra log attributes;
+// mapped client errors are covered by the request_finished record of the
+// requestContext middleware.
+func (a *API) fail(w http.ResponseWriter, r *http.Request, err error, attrs ...slog.Attr) {
+	status, code, message := errorResponse(err)
+	if status >= http.StatusInternalServerError {
+		a.logger.LogAttrs(r.Context(), slog.LevelError, "request failed", append([]slog.Attr{slog.Any("error", err)}, attrs...)...)
+	}
+	writeError(w, status, code, message)
+}
+
+func errorResponse(err error) (status int, code, message string) {
 	switch {
 	case errors.Is(err, context.DeadlineExceeded):
-		writeError(w, http.StatusGatewayTimeout, "timeout", "Processing timed out")
+		return http.StatusGatewayTimeout, "timeout", "Processing timed out"
 	case errors.Is(err, context.Canceled):
-		writeError(w, http.StatusRequestTimeout, "canceled", "Request was canceled")
+		return http.StatusRequestTimeout, "canceled", "Request was canceled"
 	case errors.Is(err, pdf.ErrInvalid):
-		writeError(w, http.StatusUnprocessableEntity, "invalid_pdf", "The PDF is invalid or encrypted")
+		return http.StatusUnprocessableEntity, "invalid_pdf", "The PDF is invalid or encrypted"
 	case errors.Is(err, pdf.ErrNoBarcode):
-		writeError(w, http.StatusUnprocessableEntity, "barcode_not_found", "No readable PDF417 barcode found")
+		return http.StatusUnprocessableEntity, "barcode_not_found", "No readable PDF417 barcode found"
 	case errors.Is(err, pdf.ErrMultiple):
-		writeError(w, http.StatusUnprocessableEntity, "multiple_boarding_passes", "Upload one distinct boarding pass per request")
+		return http.StatusUnprocessableEntity, "multiple_boarding_passes", "Upload one distinct boarding pass per request"
 	case errors.Is(err, pdf.ErrTooManyPages):
-		writeError(w, http.StatusUnprocessableEntity, "too_many_pages", "PDF exceeds the 10-page limit")
+		return http.StatusUnprocessableEntity, "too_many_pages", "PDF exceeds the 10-page limit"
 	case errors.Is(err, service.ErrInvalidBCBP):
-		writeError(w, http.StatusUnprocessableEntity, "invalid_bcbp", "Barcode does not contain a valid supported BCBP payload")
+		return http.StatusUnprocessableEntity, "invalid_bcbp", "Barcode does not contain a valid supported BCBP payload"
 	case errors.Is(err, skypicker.ErrUnavailable):
-		writeError(w, http.StatusBadGateway, "locations_unavailable", "Airport information is temporarily unavailable")
+		return http.StatusBadGateway, "locations_unavailable", "Airport information is temporarily unavailable"
 	case errors.Is(err, skypicker.ErrNotFound):
-		writeError(w, http.StatusUnprocessableEntity, "airport_not_found", "Airport code was not found in the Locations API")
+		return http.StatusUnprocessableEntity, "airport_not_found", "Airport code was not found in the Locations API"
 	default:
-		a.logger.Error("request failed", "error", err)
-		writeError(w, http.StatusInternalServerError, "internal_error", "An internal error occurred")
+		return http.StatusInternalServerError, "internal_error", "An internal error occurred"
 	}
 }
 

@@ -321,6 +321,17 @@ Process-wide, cross-cutting dependencies live in `internal/base`. Its `base.Base
 currently provides the logger and is where telemetry providers will be added, so
 components that receive it gain them without constructor changes.
 
+Logs are JSON on stdout. The request middleware stores the request ID (taken from
+`X-Request-ID` or generated) in the request context with `base.WithRequestID`, and
+the handler from `base.NewLogHandler` adds it as a top-level `request_id` to every
+record logged through the `*Context` methods, so handler, service, panic and
+`request_finished` records all carry it exactly once. `request_finished` logs
+every response at INFO, WARN for 4xx, or ERROR for 5xx. Handler validation
+failures log their reason (with the underlying error when there is one). Errors
+mapped to HTTP responses are logged with their cause only for 5xx responses; when
+parsing is interrupted by its deadline, the record also carries the parser's own
+error as `cause`. The parser service returns wrapped errors without logging them.
+
 The parser receives its `base.Base`, extractor, airport lookup, and `store.Repository`
 directly through its constructor. The API consumes it through its own `api.Parser`
 interface. Neither has a dependency on the application scope. API unit tests pass

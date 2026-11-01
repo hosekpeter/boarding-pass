@@ -16,7 +16,8 @@ type base struct {
 
 func (b *base) Logger() *slog.Logger { return b.logger }
 
-// New returns a Base backed by the given logger.
+// New returns a Base backed by the given logger. Production code passes
+// [NewJSONLogger], whose handler adds the request ID from the context.
 func New(logger *slog.Logger) Base {
 	return &base{logger: logger}
 }

@@ -3,12 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"boarding-pass/internal/api"
+	"boarding-pass/internal/base"
 	"boarding-pass/internal/config"
 	"boarding-pass/internal/dependencies"
 	"boarding-pass/internal/httpserver"
@@ -16,7 +16,7 @@ import (
 
 func main() {
 	if err := run(); err != nil {
-		slog.Error("server stopped", "error", err)
+		base.NewJSONLogger(os.Stdout).Error("server stopped", "error", err)
 		os.Exit(1)
 	}
 }

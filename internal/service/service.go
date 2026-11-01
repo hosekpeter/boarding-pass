@@ -38,18 +38,20 @@ func New(b base.Base, extractor Extractor, airports AirportLookup, repository st
 	}
 }
 
+// Parse extracts, decodes and enriches the boarding pass in pdf and saves it.
+// Errors are returned wrapped with context and are not logged; sentinel errors
+// (pdf.Err*, ErrInvalidBCBP, skypicker.ErrUnavailable/ErrNotFound and context
+// errors) remain detectable with errors.Is.
 func (s *Service) Parse(ctx context.Context, pdf []byte) (bcbp.BoardingPass, error) {
 	var empty bcbp.BoardingPass
 	payload, err := s.extractor.Extract(ctx, pdf)
 	if err != nil {
-		s.logger.Error("failed to extract boarding pass data", "error", err)
-		return empty, err
+		return empty, fmt.Errorf("extract barcode: %w", err)
 	}
 
 	pass, err := bcbp.Parse(payload)
 	if err != nil {
-		s.logger.Error("failed to parse boarding pass", "error", err)
-		return empty, fmt.Errorf("%w: %v", ErrInvalidBCBP, err)
+		return empty, fmt.Errorf("%w: %w", ErrInvalidBCBP, err)
 	}
 
 	// Resolve each airport at most once for the entire itinerary.
@@ -60,8 +62,7 @@ func (s *Service) Parse(ctx context.Context, pdf []byte) (bcbp.BoardingPass, err
 			if !ok {
 				details, err := s.airports.Lookup(ctx, airport.Code)
 				if err != nil {
-					s.logger.Error("failed to lookup airport", "error", err)
-					return empty, err
+					return empty, fmt.Errorf("lookup airport %s: %w", airport.Code, err)
 				}
 				value = bcbp.Airport{
 					Code: details.Code, AirportName: details.AirportName,
