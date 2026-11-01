@@ -9,9 +9,8 @@ import (
 	"net/http"
 	"time"
 
-	"boarding-pass/internal/api"
+	"boarding-pass/internal/base"
 	"boarding-pass/internal/config"
-	"boarding-pass/internal/dependencies"
 )
 
 const shutdownTimeout = 50 * time.Second
@@ -21,18 +20,18 @@ type Server struct {
 	logger *slog.Logger
 }
 
-func New(scope dependencies.ServiceScope, cfg config.Config) *Server {
+func New(b base.Base, handler http.Handler, cfg config.Config) *Server {
 	return &Server{
 		server: &http.Server{
 			Addr:              cfg.HTTPAddr,
-			Handler:           api.New(scope),
+			Handler:           handler,
 			ReadHeaderTimeout: 5 * time.Second,
 			ReadTimeout:       15 * time.Second,
 			WriteTimeout:      50 * time.Second,
 			IdleTimeout:       60 * time.Second,
 			MaxHeaderBytes:    16 << 10,
 		},
-		logger: scope.Base().Logger(),
+		logger: b.Logger(),
 	}
 }
 

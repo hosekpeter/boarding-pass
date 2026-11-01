@@ -14,8 +14,9 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"boarding-pass/internal/base"
+	"boarding-pass/internal/bcbp"
 	"boarding-pass/internal/client/skypicker"
-	"boarding-pass/internal/dependencies"
 	"boarding-pass/internal/pdf"
 	"boarding-pass/internal/service"
 	"boarding-pass/internal/store"
@@ -26,8 +27,16 @@ import (
 const MaxUploadBytes int64 = 10 << 20
 const ParseTimeout = 30 * time.Second
 
+// Parser is the parsing use case consumed by the HTTP layer.
+type Parser interface {
+	Parse(context.Context, []byte) (bcbp.BoardingPass, error)
+}
+
+// *service.Service is the production Parser.
+var _ Parser = (*service.Service)(nil)
+
 type API struct {
-	parser     dependencies.Parser
+	parser     Parser
 	repository store.Repository
 	logger     *slog.Logger
 	slots      chan struct{}
@@ -43,11 +52,11 @@ type API struct {
 // @servers.description Current server
 // @externalDocs.description Original assignment
 // @externalDocs.url https://github.com/mcyprian/interview_task/blob/main/Boarding_Pass_Parsing_Task.md
-func New(scope dependencies.ServiceScope) http.Handler {
+func New(b base.Base, parser Parser, repository store.Repository) http.Handler {
 	a := &API{
-		parser:     scope.Parser(),
-		repository: scope.Repository(),
-		logger:     scope.Base().Logger(),
+		parser:     parser,
+		repository: repository,
+		logger:     b.Logger(),
 		slots:      make(chan struct{}, 2),
 		uploads:    make(chan struct{}, 4),
 	}

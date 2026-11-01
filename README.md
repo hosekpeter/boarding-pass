@@ -308,17 +308,25 @@ Migrations use a separate, short-lived `database/sql` connection governed by the
 startup deadline. The shorter `DB_STATEMENT_TIMEOUT` applies to application queries.
 
 At startup, `main` loads configuration,
-creates `dependencies.NewServiceScope(ctx, cfg)`, defers `scope.Close()`, and runs
-`httpserver.New(scope, cfg).Start(ctx)`. The scope creates the logger, PDF
-extractor, airport client, PostgreSQL connection pool, and parser. It exposes the parser and
-history repository through interfaces and owns database cleanup. Configuration
+creates `dependencies.NewServiceScope(ctx, cfg)`, defers `scope.Close()`, builds
+the handler with `api.New(scope.Base(), scope.Parser(), scope.Repository())`, and
+runs `httpserver.New(scope.Base(), handler, cfg).Start(ctx)`. The scope creates the
+logger, PDF extractor, airport client, PostgreSQL connection pool, and parser, and
+owns database cleanup. Only `main` and the integration tests use the scope; other
+packages receive their dependencies through constructors. Configuration
 loading does not connect to PostgreSQL; resource initialization belongs to the
 scope. The HTTP server finishes in-flight requests before the scope is closed.
 
-The parser receives its extractor, airport lookup, and `store.Repository` directly
-through its constructor. It has no dependency on the application scope. API
-unit tests supply a fake scope, while the PDF integration test initializes the
-real scope, closes it, and reopens it to check persistence. A single
+Process-wide, cross-cutting dependencies live in `internal/base`. Its `base.Base`
+currently provides the logger and is where telemetry providers will be added, so
+components that receive it gain them without constructor changes.
+
+The parser receives its `base.Base`, extractor, airport lookup, and `store.Repository`
+directly through its constructor. The API consumes it through its own `api.Parser`
+interface. Neither has a dependency on the application scope. API unit tests pass
+a `base.Base` and parser and repository stubs directly to `api.New`, while the PDF
+integration test initializes the real scope, closes it, and reopens it to check
+persistence. A single
 `store.Repository` interface groups `Save` and `List`; PostgreSQL queries and
 driver types stay inside its implementation.
 

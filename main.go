@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"boarding-pass/internal/api"
 	"boarding-pass/internal/config"
 	"boarding-pass/internal/dependencies"
 	"boarding-pass/internal/httpserver"
@@ -34,11 +35,13 @@ func run() error {
 	}
 	defer scope.Close()
 
-	logger := scope.Base().Logger()
+	b := scope.Base()
+	logger := b.Logger()
 
 	logger.Info("server starting", "address", cfg.HTTPAddr)
 
-	err = httpserver.New(scope, cfg).Start(ctx)
+	handler := api.New(b, scope.Parser(), scope.Repository())
+	err = httpserver.New(b, handler, cfg).Start(ctx)
 
 	logger.Info("server stopped")
 	return err

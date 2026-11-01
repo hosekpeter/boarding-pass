@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"boarding-pass/internal/api"
+	"boarding-pass/internal/base"
 	"boarding-pass/internal/bcbp"
 	"boarding-pass/internal/client/skypicker"
-	"boarding-pass/internal/dependencies"
 	"boarding-pass/internal/pdf"
 	"boarding-pass/internal/service"
 	"boarding-pass/internal/store"
@@ -369,22 +369,8 @@ func assertError(t *testing.T, resp *httptest.ResponseRecorder, code string) {
 	assert.NotEmpty(t, envelope.Error.Message)
 }
 
-type apiScopeStub struct {
-	base       dependencies.Base
-	parser     dependencies.Parser
-	repository store.Repository
-}
-
-func (s *apiScopeStub) Base() dependencies.Base      { return s.base }
-func (s *apiScopeStub) Parser() dependencies.Parser  { return s.parser }
-func (s *apiScopeStub) Repository() store.Repository { return s.repository }
-
-func (s *apiScopeStub) Close() error { return nil }
-
-var _ dependencies.ServiceScope = (*apiScopeStub)(nil)
-
-func newTestAPI(parser dependencies.Parser, repository store.Repository, logger *slog.Logger) http.Handler {
-	return api.New(&apiScopeStub{base: dependencies.NewBase(logger), parser: parser, repository: repository})
+func newTestAPI(parser api.Parser, repository store.Repository, logger *slog.Logger) http.Handler {
+	return api.New(base.New(logger), parser, repository)
 }
 
 func TestInvalidTextFiltersDoNotReachRepository(t *testing.T) {

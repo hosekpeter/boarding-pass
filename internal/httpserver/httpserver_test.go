@@ -10,22 +10,17 @@ import (
 	"testing"
 	"time"
 
+	"boarding-pass/internal/base"
 	"boarding-pass/internal/config"
-	"boarding-pass/internal/dependencies"
-	"boarding-pass/internal/store"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-type fakeScope struct{}
-
-func (fakeScope) Base() dependencies.Base {
-	return dependencies.NewBase(slog.New(slog.NewTextHandler(io.Discard, nil)))
+func newTestServer(addr string) *Server {
+	b := base.New(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	return New(b, http.NotFoundHandler(), config.Config{HTTPAddr: addr})
 }
-func (fakeScope) Parser() dependencies.Parser  { return nil }
-func (fakeScope) Repository() store.Repository { return nil }
-func (fakeScope) Close() error                 { return nil }
 
 func TestStartReportsBindFailure(t *testing.T) {
 	t.Parallel()
@@ -33,7 +28,7 @@ func TestStartReportsBindFailure(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer listener.Close()
-	server := New(fakeScope{}, config.Config{HTTPAddr: listener.Addr().String()})
+	server := newTestServer(listener.Addr().String())
 	assert.Error(t, server.Start(t.Context()), "expected an error for an occupied port")
 }
 
@@ -42,14 +37,14 @@ func TestStartWithCanceledContextDoesNotBind(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	server := New(fakeScope{}, config.Config{HTTPAddr: "invalid address"})
+	server := newTestServer("invalid address")
 	assert.NoError(t, server.Start(ctx), "canceled startup tried to bind")
 }
 
 func TestShutdownWaitsForActiveRequest(t *testing.T) {
 	t.Parallel()
 
-	server := New(fakeScope{}, config.Config{HTTPAddr: "127.0.0.1:0"})
+	server := newTestServer("127.0.0.1:0")
 	address := make(chan string, 1)
 	server.server.BaseContext = func(listener net.Listener) context.Context {
 		address <- listener.Addr().String()

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
+	"boarding-pass/internal/base"
 	"boarding-pass/internal/bcbp"
 	"boarding-pass/internal/client/skypicker"
 	"boarding-pass/internal/pdf"
@@ -50,14 +51,14 @@ func (s *repositoryStub) List(context.Context, store.Filter) (store.Page, error)
 
 const validPayload = "M1CYPRIAN/MICHAL       ZKN85B KSCPRGFR 7774 105Y029C0126 100"
 
-func testLogger() *slog.Logger { return slog.New(slog.NewJSONHandler(io.Discard, nil)) }
+func testBase() base.Base { return base.New(slog.New(slog.NewJSONHandler(io.Discard, nil))) }
 
 func TestParseEnrichesBeforeSave(t *testing.T) {
 	t.Parallel()
 
 	airports := &lookupStub{}
 	repo := &repositoryStub{}
-	parser := service.New(testLogger(), extractorStub{value: validPayload}, airports, repo)
+	parser := service.New(testBase(), extractorStub{value: validPayload}, airports, repo)
 	pass, err := parser.Parse(t.Context(), []byte("PDF"))
 	require.NoError(t, err)
 	wantOrigin := bcbp.Airport{Code: "KSC", AirportName: "Airport", CityName: "City", Country: "Country"}
@@ -87,7 +88,7 @@ func TestFailuresAreNotSaved(t *testing.T) {
 			t.Parallel()
 
 			repo := &repositoryStub{}
-			_, err := service.New(testLogger(), tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(t.Context(), nil)
+			_, err := service.New(testBase(), tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(t.Context(), nil)
 			require.Error(t, err)
 			if tc.want != nil {
 				assert.ErrorIs(t, err, tc.want)
@@ -101,7 +102,7 @@ func TestSaveFailureIsReturned(t *testing.T) {
 	t.Parallel()
 
 	failure := errors.New("disk full")
-	_, err := service.New(testLogger(), extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(t.Context(), nil)
+	_, err := service.New(testBase(), extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(t.Context(), nil)
 	require.ErrorIs(t, err, failure)
 }
 
@@ -110,7 +111,7 @@ func TestRepeatedAirportsResolvedOnce(t *testing.T) {
 
 	payload := "M2" + validPayload[2:] + validPayload[23:]
 	airports := &lookupStub{}
-	pass, err := service.New(testLogger(), extractorStub{value: payload}, airports, &repositoryStub{}).Parse(t.Context(), nil)
+	pass, err := service.New(testBase(), extractorStub{value: payload}, airports, &repositoryStub{}).Parse(t.Context(), nil)
 	require.NoError(t, err)
 	assert.Len(t, pass.Legs, 2)
 	assert.Equal(t, 2, airports.calls)

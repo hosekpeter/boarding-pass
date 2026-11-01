@@ -6,10 +6,10 @@ import (
 	"log/slog"
 	"os"
 
+	"boarding-pass/internal/base"
+	"boarding-pass/internal/client/skypicker"
 	"boarding-pass/internal/config"
 	"boarding-pass/internal/db"
-
-	"boarding-pass/internal/client/skypicker"
 	"boarding-pass/internal/pdf"
 	"boarding-pass/internal/service"
 	"boarding-pass/internal/store"
@@ -18,15 +18,15 @@ import (
 )
 
 type serviceScope struct {
-	base       Base
+	base       base.Base
 	db         *pgxpool.Pool
 	repository store.Repository
-	parser     Parser
+	parser     *service.Service
 }
 
-func (s *serviceScope) Base() Base                   { return s.base }
+func (s *serviceScope) Base() base.Base              { return s.base }
 func (s *serviceScope) Repository() store.Repository { return s.repository }
-func (s *serviceScope) Parser() Parser               { return s.parser }
+func (s *serviceScope) Parser() *service.Service     { return s.parser }
 
 func (s *serviceScope) Close() error {
 	if s == nil || s.db == nil {
@@ -46,7 +46,7 @@ func NewServiceScope(ctx context.Context, cfg config.Config) (ServiceScope, erro
 		return nil, fmt.Errorf("validate configuration: %w", err)
 	}
 
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	b := base.New(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
 
 	extractor, err := pdf.New()
 	if err != nil {
@@ -75,9 +75,9 @@ func NewServiceScope(ctx context.Context, cfg config.Config) (ServiceScope, erro
 	}
 	repository := store.New(database)
 	return &serviceScope{
-		base:       NewBase(logger),
+		base:       b,
 		db:         database,
 		repository: repository,
-		parser:     service.New(logger, extractor, airports, repository),
+		parser:     service.New(b, extractor, airports, repository),
 	}, nil
 }

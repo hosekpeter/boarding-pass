@@ -52,7 +52,7 @@ func TestSamplePDFEndToEnd(t *testing.T) {
 	scope, err := dependencies.NewServiceScope(t.Context(), cfg)
 	require.NoError(t, err)
 	defer scope.Close()
-	handler := api.New(scope)
+	handler := newScopedAPI(scope)
 	data, err := os.ReadFile("../../testdata/boarding_pass.pdf")
 	require.NoError(t, err)
 	var body bytes.Buffer
@@ -87,7 +87,7 @@ func TestSamplePDFEndToEnd(t *testing.T) {
 	reopened, err := dependencies.NewServiceScope(t.Context(), cfg)
 	require.NoError(t, err)
 	defer reopened.Close()
-	handler = api.New(reopened)
+	handler = newScopedAPI(reopened)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest("GET", "/boarding-passes?passenger_name=cyprian&airline_code=FR&limit=1", nil))
 	require.Equal(t, http.StatusOK, response.Code, response.Body.String())
@@ -135,7 +135,7 @@ func TestMultipleLegsEndToEnd(t *testing.T) {
 			scope, err := dependencies.NewServiceScope(t.Context(), cfg)
 			require.NoError(t, err)
 			defer scope.Close()
-			handler := api.New(scope)
+			handler := newScopedAPI(scope)
 			parse := func() *httptest.ResponseRecorder {
 				response := httptest.NewRecorder()
 				handler.ServeHTTP(response, upload(t, []string{"file"}, data))
@@ -185,4 +185,9 @@ func TestMultipleLegsEndToEnd(t *testing.T) {
 			}
 		})
 	}
+}
+
+// newScopedAPI builds the API handler from a real scope, as main does.
+func newScopedAPI(scope dependencies.ServiceScope) http.Handler {
+	return api.New(scope.Base(), scope.Parser(), scope.Repository())
 }

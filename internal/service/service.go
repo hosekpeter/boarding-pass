@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"boarding-pass/internal/base"
 	"boarding-pass/internal/bcbp"
 	"boarding-pass/internal/client/skypicker"
 	"boarding-pass/internal/store"
@@ -28,9 +29,9 @@ type Service struct {
 	repository store.Repository
 }
 
-func New(logger *slog.Logger, extractor Extractor, airports AirportLookup, repository store.Repository) *Service {
+func New(b base.Base, extractor Extractor, airports AirportLookup, repository store.Repository) *Service {
 	return &Service{
-		logger:     logger,
+		logger:     b.Logger(),
 		extractor:  extractor,
 		airports:   airports,
 		repository: repository,
