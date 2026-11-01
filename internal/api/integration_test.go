@@ -111,7 +111,7 @@ func TestMultipleLegsEndToEnd(t *testing.T) {
 			carriers := []string{"FR", "BA", "AA", "UA"}
 			var payload strings.Builder
 			fmt.Fprintf(&payload, "M%d%-20sE", count, "TEST/TRAVELER")
-			for i := 0; i < count; i++ {
+			for i := range count {
 				fmt.Fprintf(&payload, "%-7s%s%s%-3s%-5s%03d%s%s%-5s%s%s", "REF123", codes[i], codes[i+1], carriers[i], "0012", 105, "Y", "001A", "00001", "1", "00")
 			}
 			data := testutil.PDF(t, payload.String())

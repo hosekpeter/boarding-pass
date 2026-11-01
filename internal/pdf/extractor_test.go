@@ -101,9 +101,9 @@ func TestEarlyRejection(t *testing.T) {
 	t.Parallel()
 
 	extractor := &Extractor{}
-	_, err := extractor.Extract(context.Background(), []byte("hello"))
+	_, err := extractor.Extract(t.Context(), []byte("hello"))
 	require.ErrorIs(t, err, ErrInvalid)
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err = extractor.Extract(ctx, []byte("%PDF-1.4"))
 	require.ErrorIs(t, err, context.Canceled)
@@ -116,8 +116,8 @@ func TestImageWithoutBarcode(t *testing.T) {
 	f, err := os.Create(path)
 	require.NoError(t, err)
 	img := image.NewGray(image.Rect(0, 0, 50, 50))
-	for y := 0; y < 50; y++ {
-		for x := 0; x < 50; x++ {
+	for y := range 50 {
+		for x := range 50 {
 			img.SetGray(x, y, color.Gray{Y: 255})
 		}
 	}

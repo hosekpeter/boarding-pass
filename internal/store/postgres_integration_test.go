@@ -20,7 +20,7 @@ import (
 func TestPersistenceFiltersAndPagination(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	cfg := testutil.DatabaseConfig(t)
 	s, pool := openTestStore(t, cfg)
 	for _, pass := range []bcbp.BoardingPass{
@@ -72,15 +72,13 @@ func TestConcurrentSaves(t *testing.T) {
 	s, pool := openTestStore(t, testutil.DatabaseConfig(t))
 	defer pool.Close()
 	var wg sync.WaitGroup
-	for i := 0; i < 20; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			assert.NoError(t, s.Save(context.Background(), bcbp.BoardingPass{PassengerName: "TEST/USER", Legs: []bcbp.Leg{}}))
-		}()
+	for range 20 {
+		wg.Go(func() {
+			assert.NoError(t, s.Save(t.Context(), bcbp.BoardingPass{PassengerName: "TEST/USER", Legs: []bcbp.Leg{}}))
+		})
 	}
 	wg.Wait()
-	page, err := s.List(context.Background(), Filter{Limit: 100})
+	page, err := s.List(t.Context(), Filter{Limit: 100})
 	require.NoError(t, err)
 	assert.Equal(t, 20, page.Total)
 	assert.Len(t, page.Items, 20)
@@ -96,12 +94,12 @@ func TestCanceledAndInvalidQueries(t *testing.T) {
 
 	s, pool := openTestStore(t, testutil.DatabaseConfig(t))
 	defer pool.Close()
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	assert.Error(t, s.Save(ctx, bcbp.BoardingPass{}), "expected canceled save")
 	_, err := s.List(ctx, Filter{Limit: 20})
 	assert.Error(t, err, "expected canceled list")
-	_, err = s.List(context.Background(), Filter{Limit: 0})
+	_, err = s.List(t.Context(), Filter{Limit: 0})
 	assert.Error(t, err, "expected invalid limit")
 }
 

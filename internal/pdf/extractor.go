@@ -121,7 +121,7 @@ func decodeImage(ctx context.Context, path string) ([]*zxing.Result, error) {
 	// The reader stops at the first orientation containing a barcode. Scan
 	// every orientation so another passenger's rotated barcode is not missed.
 	reader := pdf417.NewPDF417Reader()
-	for rotation := 0; rotation < 4; rotation++ {
+	for rotation := range 4 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -173,8 +173,7 @@ func processError(ctx context.Context, err error) error {
 	}
 	// Poppler uses 1 for an unreadable PDF, 3 for PDF permission errors,
 	// and 2 for output-file failures. Signals and execution errors are server failures.
-	var exit *exec.ExitError
-	if errors.As(err, &exit) && (exit.ExitCode() == 1 || exit.ExitCode() == 3) {
+	if exit, ok := errors.AsType[*exec.ExitError](err); ok && (exit.ExitCode() == 1 || exit.ExitCode() == 3) {
 		return fmt.Errorf("%w: %v", ErrInvalid, err)
 	}
 	return err

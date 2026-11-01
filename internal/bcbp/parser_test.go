@@ -119,7 +119,7 @@ func TestParseInvalid(t *testing.T) {
 func TestAllTruncations(t *testing.T) {
 	t.Parallel()
 
-	for n := 0; n < len(sample); n++ {
+	for n := range len(sample) {
 		_, err := Parse(sample[:n])
 		assert.Error(t, err, "accepted truncation at %d", n)
 	}

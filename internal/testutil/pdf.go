@@ -62,8 +62,8 @@ func barcodePDF(t testing.TB, options PDFOptions, pages ...[]PDFBarcode) []byte 
 		for _, symbol := range page {
 			matrix := testBarcode(t, symbol.Payload)
 			fmt.Fprintf(&content, "q %s cm 0 g\n", symbol.Transform)
-			for y := 0; y < matrix.Bounds().Dy(); y++ {
-				for x := 0; x < matrix.Bounds().Dx(); x++ {
+			for y := range matrix.Bounds().Dy() {
+				for x := range matrix.Bounds().Dx() {
 					r, _, _, _ := matrix.At(x, y).RGBA()
 					if r == 0 {
 						fmt.Fprintf(&content, "%d %d 2 2 re f\n", 2*x, 2*(matrix.Bounds().Dy()-1-y))

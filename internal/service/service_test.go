@@ -58,7 +58,7 @@ func TestParseEnrichesBeforeSave(t *testing.T) {
 	airports := &lookupStub{}
 	repo := &repositoryStub{}
 	parser := service.New(testLogger(), extractorStub{value: validPayload}, airports, repo)
-	pass, err := parser.Parse(context.Background(), []byte("PDF"))
+	pass, err := parser.Parse(t.Context(), []byte("PDF"))
 	require.NoError(t, err)
 	wantOrigin := bcbp.Airport{Code: "KSC", AirportName: "Airport", CityName: "City", Country: "Country"}
 	wantDestination := bcbp.Airport{Code: "PRG", AirportName: "Airport", CityName: "City", Country: "Country"}
@@ -87,7 +87,7 @@ func TestFailuresAreNotSaved(t *testing.T) {
 			t.Parallel()
 
 			repo := &repositoryStub{}
-			_, err := service.New(testLogger(), tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(context.Background(), nil)
+			_, err := service.New(testLogger(), tc.extract, &lookupStub{err: tc.lookupErr}, repo).Parse(t.Context(), nil)
 			require.Error(t, err)
 			if tc.want != nil {
 				assert.ErrorIs(t, err, tc.want)
@@ -101,7 +101,7 @@ func TestSaveFailureIsReturned(t *testing.T) {
 	t.Parallel()
 
 	failure := errors.New("disk full")
-	_, err := service.New(testLogger(), extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(context.Background(), nil)
+	_, err := service.New(testLogger(), extractorStub{value: validPayload}, &lookupStub{}, &repositoryStub{err: failure}).Parse(t.Context(), nil)
 	require.ErrorIs(t, err, failure)
 }
 
@@ -110,7 +110,7 @@ func TestRepeatedAirportsResolvedOnce(t *testing.T) {
 
 	payload := "M2" + validPayload[2:] + validPayload[23:]
 	airports := &lookupStub{}
-	pass, err := service.New(testLogger(), extractorStub{value: payload}, airports, &repositoryStub{}).Parse(context.Background(), nil)
+	pass, err := service.New(testLogger(), extractorStub{value: payload}, airports, &repositoryStub{}).Parse(t.Context(), nil)
 	require.NoError(t, err)
 	assert.Len(t, pass.Legs, 2)
 	assert.Equal(t, 2, airports.calls)

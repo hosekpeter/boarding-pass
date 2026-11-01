@@ -42,8 +42,8 @@ func (c Config) Validate() error {
 	var problems []error
 	invalid := make(map[string]bool)
 	if err := check.Struct(c); err != nil {
-		var fields validator.ValidationErrors
-		if !errors.As(err, &fields) {
+		fields, ok := errors.AsType[validator.ValidationErrors](err)
+		if !ok {
 			return err
 		}
 		for _, field := range fields {

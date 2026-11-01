@@ -30,8 +30,8 @@ func TestLookupAndCache(t *testing.T) {
 	defer server.Close()
 	client, err := New(server.URL, server.Client())
 	require.NoError(t, err)
-	for i := 0; i < 2; i++ {
-		airport, err := client.Lookup(context.Background(), "PRG")
+	for range 2 {
+		airport, err := client.Lookup(t.Context(), "PRG")
 		require.NoError(t, err)
 		assert.Equal(t, Airport{Code: "PRG", CityName: "Prague", Country: "Czechia", AirportName: "Václav Havel Airport Prague"}, airport)
 	}
@@ -41,7 +41,7 @@ func TestLookupAndCache(t *testing.T) {
 	entry.expires = time.Now().Add(-time.Second)
 	client.cache["PRG"] = entry
 	client.mu.Unlock()
-	_, err = client.Lookup(context.Background(), "PRG")
+	_, err = client.Lookup(t.Context(), "PRG")
 	require.NoError(t, err)
 	assert.Equal(t, int32(2), calls.Load(), "expired entry was reused")
 }
@@ -73,8 +73,8 @@ func TestLookupFailuresAreNotCached(t *testing.T) {
 			defer server.Close()
 			client, err := New(server.URL, server.Client())
 			require.NoError(t, err)
-			for i := 0; i < 2; i++ {
-				_, err = client.Lookup(context.Background(), "PRG")
+			for range 2 {
+				_, err = client.Lookup(t.Context(), "PRG")
 				require.ErrorIs(t, err, ErrUnavailable)
 			}
 			assert.Equal(t, 2, calls, "cached a failure")
@@ -103,11 +103,11 @@ func TestLookupCancellation(t *testing.T) {
 	defer server.Close()
 	client, err := New(server.URL, server.Client())
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
 	defer cancel()
 	_, err = client.Lookup(ctx, "PRG")
 	assert.Error(t, err, "expected timeout")
-	canceled, stop := context.WithCancel(context.Background())
+	canceled, stop := context.WithCancel(t.Context())
 	stop()
 	_, err = client.Lookup(canceled, "PRG")
 	require.ErrorIs(t, err, context.Canceled)

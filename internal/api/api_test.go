@@ -206,7 +206,7 @@ func TestConcurrentParseLimit(t *testing.T) {
 	parser := &blockingParser{started: make(chan struct{}, 2), release: make(chan struct{})}
 	handler := newTestAPI(parser, &repoStub{}, logger())
 	done := make(chan struct{}, 2)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req := upload(t, []string{"file"}, []byte("%PDF-1.4"))
 		go func() { handler.ServeHTTP(httptest.NewRecorder(), req); done <- struct{}{} }()
 	}
