@@ -201,17 +201,14 @@ func (a *API) parse(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	pass, err := a.parser.Parse(ctx, data)
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		// The response is mapped from the context error alone; the parser's
-		// error is logged as the cause of the interruption.
-		var attrs []slog.Attr
-		if err != nil {
-			attrs = append(attrs, slog.Any("cause", err))
-		}
-		a.fail(w, r, fmt.Errorf("parse boarding pass: %w", ctxErr), attrs...)
-		return
-	}
 	if err != nil {
+		// A successful parse has already saved the record, so the context is
+		// consulted only on failure. The response is then mapped from the
+		// context error alone; the parser's error is logged as its cause.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			a.fail(w, r, fmt.Errorf("parse boarding pass: %w", ctxErr), slog.Any("cause", err))
+			return
+		}
 		a.fail(w, r, fmt.Errorf("parse boarding pass: %w", err))
 		return
 	}

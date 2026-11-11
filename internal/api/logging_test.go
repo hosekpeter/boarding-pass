@@ -280,7 +280,6 @@ func TestInterruptedParseLogsCause(t *testing.T) {
 		cause    string
 	}{
 		{name: "timeout with cause", ctx: expired, parseErr: errors.New("renderer interrupted"), baseline: context.DeadlineExceeded, status: 504, cause: "renderer interrupted"},
-		{name: "timeout without cause", ctx: expired, baseline: context.DeadlineExceeded, status: 504},
 		{name: "canceled with inner deadline", ctx: canceled, parseErr: context.DeadlineExceeded, baseline: context.Canceled, status: 408},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -310,13 +309,31 @@ func TestInterruptedParseLogsCause(t *testing.T) {
 			require.Len(t, records, 2, logs.String())
 			assert.Equal(t, "request failed", records[0]["msg"])
 			assert.Equal(t, "parse boarding pass: "+context.DeadlineExceeded.Error(), records[0]["error"])
-			if tc.cause != "" {
-				assert.Equal(t, tc.cause, records[0]["cause"])
-			} else {
-				assert.NotContains(t, records[0], "cause")
-			}
+			assert.Equal(t, tc.cause, records[0]["cause"])
 		})
 	}
+}
+
+// A parse that succeeds has already saved the record, so an expired request
+// context must not turn the response into an error.
+func TestSuccessfulParseIgnoresExpiredContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithDeadline(t.Context(), time.Now())
+	t.Cleanup(cancel)
+
+	var logs bytes.Buffer
+	resp := httptest.NewRecorder()
+	req := upload(t, []string{"file"}, []byte("%PDF-1.4")).WithContext(ctx)
+	newTestAPI(&parserStub{}, &repoStub{}, base.NewJSONLogger(&logs)).ServeHTTP(resp, req)
+
+	require.Equal(t, http.StatusOK, resp.Code, resp.Body.String())
+	assert.JSONEq(t, `{"decoded_bcbp":{"passenger_name":"TEST/USER","legs":[]}}`, resp.Body.String())
+
+	records := decodeLogs(t, &logs)
+	require.Len(t, records, 1, logs.String())
+	assert.Equal(t, "request_finished", records[0]["msg"])
+	assert.Equal(t, "INFO", records[0]["level"])
 }
 
 func failingParser(err error) func() *parserStub {
