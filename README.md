@@ -323,9 +323,10 @@ components that receive it gain them without constructor changes.
 
 Logs are JSON on stdout. The request middleware stores the request ID (taken from
 `X-Request-ID` or generated) in the request context with `base.WithRequestID`, and
-the handler from `base.NewLogHandler` adds it as a top-level `request_id` to every
-record logged through the `*Context` methods, so handler, service, panic and
-`request_finished` records all carry it exactly once. `request_finished` logs
+the handler from `base.NewLogHandler` adds it as `request_id` to every record
+logged through the `*Context` methods, so handler, service, panic and
+`request_finished` records all carry it; production code never logs
+`request_id` itself. `request_finished` logs
 every response at INFO, WARN for 4xx, or ERROR for 5xx. Handler validation
 failures log their reason (with the underlying error when there is one). Errors
 mapped to HTTP responses are logged with their cause only for 5xx responses; when
